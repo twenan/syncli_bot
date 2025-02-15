@@ -2,7 +2,7 @@ import asyncio
 import requests
 import logging
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 from aiogram.enums import ChatType
 from config import Config, load_config
@@ -14,12 +14,11 @@ logger = logging.getLogger(__name__)
 config: Config = load_config()
 BOT_TOKEN: str = config.tg_bot.token
 
-API_TOKEN = "7262011606:AAHg4H2fqIyD6KWfLRiMnnduY5dad_NG1-U"  # Заменить на реальный токен
-
-bot = Bot(token=API_TOKEN)
-dp = Dispatcher()  # В aiogram 3.x Dispatcher создается без аргументов
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher()
 
 ADMIN_ID = 219614301  # Telegram ID менеджера
+survey_id_counter = 1  # ID анкеты, начинается с 1
 
 questions = [
     "Ваше имя и фамилия",
@@ -28,13 +27,13 @@ questions = [
     "Напишите наименование товара",
     "Вставьте ссылку на товар на маркетплейсах (если есть)",
     "Какое количество вам нужно?",
-    "Прикрепите фото товара",
+    "Прикрепите фото товара (или PDF, Excel-файл)",
     "Напишите размеры товара и количество каждого размера",
     "Укажите цвет товара",
     "Укажите, нужны ли дополнительные элементы (например, аксессуары, инструменты, важные детали).",
     "Какая упаковка нужна? (есть ли особенности упаковки и дополнительной защиты?)",
     "Брендинг (нужно ли брендирование товара, если да, укажите место и размер)",
-    "Выберите срок доставки (10-15, 15-18 или 18-25 дней)",
+    "Выберите срок доставки (10-13, 15-18, 25-30 дней, Авиа)",
     "Есть ли дополнительные уточнения?",
     "Перечислите вопросы для поставщика (если есть, укажите здесь)"
 ]
@@ -56,16 +55,34 @@ start_keyboard = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
+# Инлайн-клавиатура для выбора срока доставки
+delivery_keyboard = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [InlineKeyboardButton(text="10-13 дней", callback_data="10-13")],
+        [InlineKeyboardButton(text="15-18 дней", callback_data="15-18")],
+        [InlineKeyboardButton(text="25-30 дней", callback_data="25-30")],
+        [InlineKeyboardButton(text="Авиа", callback_data="avia")]
+    ]
+)
+
+
 @dp.message(Command("start"))
 async def start(message: types.Message):
     logger.debug("Команда /start получена")
     await message.answer("Привет! Я помогу вам с заказом. Выберите действие:", reply_markup=start_keyboard)
 
+
 @dp.message(lambda message: message.text == "Заполнить анкету")
 async def start_survey(message: types.Message):
+    global survey_id_counter
     chat_id = message.chat.id
-    user_answers[chat_id] = []
-    await message.answer(questions[0])
+    user_answers[chat_id] = {
+        "id": survey_id_counter,
+        "answers": []
+    }
+    survey_id_counter += 1
+    await message.answer(f"📝 Ваша анкета ID {user_answers[chat_id]['id']}.\n\n{questions[0]}")
+
 
 @dp.message(lambda message: message.text == "Частые вопросы")
 async def show_faq(message: types.Message):
@@ -75,69 +92,91 @@ async def show_faq(message: types.Message):
     response += "\nНапишите ваш вопрос, и я попробую ответить!"
     await message.answer(response)
 
-@dp.message(lambda message: message.photo)
-async def handle_photo(message: types.Message):
+
+@dp.message(lambda message: message.photo or message.document)
+async def handle_file(message: types.Message):
     chat_id = message.chat.id
 
-    if chat_id in user_answers and len(user_answers[chat_id]) == 6:  # 6 - индекс вопроса "Прикрепите фото товара"
-        photo_file_id = message.photo[-1].file_id  # Берем фото в максимальном качестве
-        user_answers[chat_id].append(photo_file_id)  # Сохраняем фото как file_id
-        
-        await message.answer("Фото получено. " + questions[len(user_answers[chat_id])])
+    if chat_id in user_answers and len(user_answers[chat_id]["answers"]) == 6:
+        file_id = message.photo[-1].file_id if message.photo else message.document.file_id
+        user_answers[chat_id]["answers"].append(file_id)
+        await message.answer(f"✅ Файл получен.\n\n{questions[len(user_answers[chat_id]['answers'])]}")
     else:
-        await message.answer("Отправьте фото в процессе заполнения анкеты после соответствующего вопроса.")
-        # **Логируем фото (для проверки)**
-        logging.info(f"Сохранено фото: {photo_file_id}")
+        await message.answer("📎 Отправьте файл в процессе заполнения анкеты после соответствующего вопроса.")
 
 
 @dp.message()
 async def collect_answers_or_faq(message: types.Message):
     chat_id = message.chat.id
 
-    # Проверяем, есть ли текст в сообщении
+    if message.text.lower() == "назад" and chat_id in user_answers and user_answers[chat_id]["answers"]:
+        user_answers[chat_id]["answers"].pop()
+        await message.answer(f"🔄 Введите новый ответ:\n\n{questions[len(user_answers[chat_id]['answers'])]}")
+        return
+
     if not message.text:
-        return  # Если нет текста (например, фото, документ), просто игнорируем
+        return
 
     text = message.text.lower()
 
-    
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         logger.debug(f"Сообщение в группе ({message.chat.title}): {message.text}")
         for keyword, response in faq.items():
             if any(word in text for word in keyword.lower().split()):
                 await message.reply(response)
                 return
-        return  # Если нет совпадений в FAQ, бот просто игнорирует сообщение в группе
-    
+        return
+
     if chat_id in user_answers:
-        user_answers[chat_id].append(message.text)
-        if len(user_answers[chat_id]) < len(questions):
-            await message.answer(questions[len(user_answers[chat_id])])
+        user_answers[chat_id]["answers"].append(message.text)
+
+        if len(user_answers[chat_id]["answers"]) < len(questions):
+            if len(user_answers[chat_id]["answers"]) == 12:  # Вопрос о сроке доставки
+                await message.answer("⏳ Выберите срок доставки:", reply_markup=delivery_keyboard)
+            else:
+                await message.answer(questions[len(user_answers[chat_id]["answers"])])
         else:
             answers_text = "\n".join([
-                f"{questions[i]}: {answer}" if i != 6 else "Прикрепленное фото"
-                for i, answer in enumerate(user_answers[chat_id])
+                f"{questions[i]}: {answer}" if i != 6 else "Прикрепленный файл"
+                for i, answer in enumerate(user_answers[chat_id]["answers"])
             ])
-            # Отправляем текст анкеты админу
-            await bot.send_message(ADMIN_ID, f"📩 Новая анкета от клиента:\n\n{answers_text}")
-            # Проверяем, есть ли фото (оно находится на 7-м месте в анкете)
-            if len(user_answers[chat_id]) > 6 and user_answers[chat_id][6].startswith("Ag"):  # file_id фото начинается с "Ag"
-                await bot.send_photo(ADMIN_ID, user_answers[chat_id][6], caption="Фото товара от клиента 📸")
+
+            await bot.send_message(
+                ADMIN_ID, 
+                f"📩 Новая анкета ID {user_answers[chat_id]['id']}:\n\n{answers_text}"
+            )
+
+            if len(user_answers[chat_id]["answers"]) > 6 and user_answers[chat_id]["answers"][6]:
+                await bot.send_document(
+                    ADMIN_ID, 
+                    user_answers[chat_id]["answers"][6], 
+                    caption=f"📎 Файл к анкете ID {user_answers[chat_id]['id']}"
+                )
+
             await message.answer("Спасибо! Мы свяжемся с вами в ближайшее время.")
             del user_answers[chat_id]
     else:
-        # Поиск ответа в FAQ по ключевым словам
         for keyword, response in faq.items():
             if any(word in text for word in keyword.lower().split()):
                 await message.answer(response)
                 return
+
         if message.chat.type == ChatType.PRIVATE:
             await message.answer("Я пока не знаю ответа на этот вопрос, но передам его менеджеру!")
 
-# Главная асинхронная функция для запуска бота
+
+@dp.callback_query()
+async def delivery_selected(call: types.CallbackQuery):
+    chat_id = call.message.chat.id
+    if chat_id in user_answers:
+        user_answers[chat_id]["answers"].append(call.data)
+        await call.message.answer("✅ Срок доставки выбран. " + questions[len(user_answers[chat_id]['answers'])])
+    await call.answer()
+
+
 async def main():
-    await dp.start_polling(bot)  # Передаем объект bot при запуске
+    await dp.start_polling(bot)
+
 
 if __name__ == '__main__':
-    # Теперь запускаем бота через асинхронный вызов
     asyncio.run(main())
