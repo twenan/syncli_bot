@@ -6,8 +6,6 @@ from aiogram.types import (
 )
 from aiogram.filters import Command
 from aiogram.enums import ChatType
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
 from config import Config, load_config
 
 # Настройка логирования
@@ -23,11 +21,6 @@ dp = Dispatcher()
 ADMIN_ID = 219614301  # Telegram ID менеджера
 survey_id_counter = 1  # ID анкеты, начинается с 1
 user_answers = {}
-
-# Определяем состояния для FSM
-class SurveyState(StatesGroup):
-    waiting_for_consent = State()
-    filling_survey = State()
 
 # Вопросы анкеты
 questions = [
@@ -57,7 +50,7 @@ consent_keyboard = InlineKeyboardMarkup(
     ]
 )
 
-# Клавиатура для меню
+# Обычная клавиатура для меню
 start_keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Заполнить анкету")],
@@ -78,8 +71,7 @@ delivery_keyboard = InlineKeyboardMarkup(
 )
 
 @dp.message(Command("start"))
-async def start(message: types.Message, state: FSMContext):
-    await state.set_state(SurveyState.waiting_for_consent)
+async def start(message: types.Message):
     logger.debug("Команда /start получена")
     await message.answer(
         "Прежде чем продолжить, пожалуйста, подтвердите согласие на обработку персональных данных.",
@@ -94,8 +86,7 @@ async def send_offer(call: types.CallbackQuery):
     )
 
 @dp.callback_query(lambda c: c.data == "consent_yes")
-async def consent_yes(call: types.CallbackQuery, state: FSMContext):
-    await state.set_state(SurveyState.filling_survey)
+async def consent_yes(call: types.CallbackQuery):
     await call.message.answer("✅ Спасибо! Теперь вы можете заполнить анкету.", reply_markup=start_keyboard)
 
 @dp.callback_query(lambda c: c.data == "consent_no")
@@ -117,12 +108,7 @@ async def contact_manager(call: types.CallbackQuery):
     await call.message.answer("🔹 Свяжитесь с менеджером: @ВашМенеджер")
 
 @dp.message(lambda message: message.text == "Заполнить анкету")
-async def start_survey(message: types.Message, state: FSMContext):
-    current_state = await state.get_state()
-    if current_state != SurveyState.filling_survey:
-        await message.answer("❗ Сначала подтвердите согласие на обработку персональных данных!")
-        return
-
+async def start_survey(message: types.Message):
     global survey_id_counter
     chat_id = message.chat.id
     user_answers[chat_id] = {
