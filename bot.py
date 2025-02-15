@@ -1,4 +1,5 @@
 import asyncio
+import requests
 import logging
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
@@ -38,7 +39,6 @@ questions = [
 ]
 
 user_answers = {}
-user_consent = {}
 
 faq = {
     "доставка": "Мы предлагаем доставку карго (10-13 дней, 15-18 дней, 25-30 дней) и авиа (от 1 дня). По белой доставке обратитесь к менеджеру.",
@@ -78,33 +78,45 @@ async def start(message: types.Message):
     await message.answer("Привет! Я помогу вам с заказом. Выберите действие:", reply_markup=start_keyboard)
 
 @dp.message(lambda message: message.text == "Заполнить анкету")
-async def request_consent(message: types.Message):
-    chat_id = message.chat.id
-    await message.answer("Перед началом заполнения анкеты, пожалуйста, дайте согласие на обработку персональных данных:", reply_markup=consent_keyboard)
-    user_consent[chat_id] = False
+async def ask_consent(message: types.Message):
+    await message.answer(
+        "Перед началом анкеты, пожалуйста, дайте согласие на обработку персональных данных.",
+        reply_markup=consent_keyboard
+    )
 
 @dp.callback_query(lambda call: call.data == "consent_yes")
-async def consent_given(call: types.CallbackQuery):
-    chat_id = call.message.chat.id
-    user_consent[chat_id] = True
+async def consent_yes(call: types.CallbackQuery):
     global survey_id_counter
+    chat_id = call.message.chat.id
     user_answers[chat_id] = {
         "id": survey_id_counter,
         "answers": []
     }
     survey_id_counter += 1
-    await call.message.answer(f"📝 Ваша анкета ID {user_answers[chat_id]['id']}.", reply_markup=types.ReplyKeyboardRemove())
+    await call.message.answer(f"📝 Ваша анкета ID {user_answers[chat_id]['id']}.")
     await call.message.answer(questions[0])
     await call.answer()
 
 @dp.callback_query(lambda call: call.data == "consent_no")
-async def consent_denied(call: types.CallbackQuery):
-    await call.message.answer("Мы не передаем ваши данные третьим лицам. Это нужно только для обработки заказа. Вы согласны?", reply_markup=consent_keyboard)
+async def consent_no(call: types.CallbackQuery):
+    await call.message.answer(
+        "Мы не собираемся передавать ваши персональные данные третьим лицам. Они нужны только для обработки вашего заказа менеджером.\n\n"
+        "❓ Все равно не согласны? Тогда мы просим вас связаться напрямую с менеджером: @your_manager"
+    )
     await call.answer()
 
 @dp.callback_query(lambda call: call.data == "read_offer")
 async def send_offer(call: types.CallbackQuery):
-    await call.message.answer_document(open("offer.pdf", "rb"), caption="📄 Оферта на обработку персональных данных.")
+    with open("offer.pdf", "rb") as file:
+        await call.message.answer_document(file, caption="📄 Оферта на обработку персональных данных")
+    await call.answer()
+
+@dp.callback_query()
+async def delivery_selected(call: types.CallbackQuery):
+    chat_id = call.message.chat.id
+    if chat_id in user_answers:
+        user_answers[chat_id]["answers"].append(call.data)
+        await call.message.answer("✅ Срок доставки выбран. " + questions[len(user_answers[chat_id]['answers'])])
     await call.answer()
 
 async def main():
