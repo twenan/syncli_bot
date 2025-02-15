@@ -95,14 +95,6 @@ async def request_consent(message: types.Message):
         reply_markup=consent_keyboard
     )
 
-# Обработка согласия
-@dp.message(lambda message: message.text == "Заполнить анкету")
-async def request_consent(message: types.Message):
-    await message.answer(
-        "Перед заполнением анкеты, пожалуйста, дайте согласие на обработку персональных данных.",
-        reply_markup=consent_keyboard
-    )
-
 
 @dp.callback_query(lambda call: call.data in ["consent_yes", "consent_no", "view_offer"])
 async def process_consent(call: types.CallbackQuery):
@@ -131,11 +123,25 @@ async def process_consent(call: types.CallbackQuery):
 
 # Если второй раз "Нет" — ссылка на менеджера
 @dp.message(lambda message: message.text == "Нет")
-async def second_consent_decline(message: types.Message):
-    await message.answer(
-        "Тогда свяжитесь напрямую с менеджером: @YourManagerTelegram",
-        reply_markup=types.ReplyKeyboardRemove()
-    )
+async def process_consent_decline(message: types.Message):
+    chat_id = message.chat.id
+
+    # Если пользователь уже отказался один раз — предлагаем связаться с менеджером
+    if chat_id in user_answers and user_answers[chat_id].get("declined_once", False):
+        await message.answer(
+            "Тогда свяжитесь напрямую с менеджером: @YourManagerTelegram",
+            reply_markup=start_keyboard  # Оставляем клавиатуру
+        )
+        del user_answers[chat_id]  # Удаляем пользователя из списка
+    else:
+        # Первый отказ — предлагаем подумать еще раз
+        user_answers[chat_id] = {"declined_once": True}  # Запоминаем отказ
+        await message.answer(
+            "Мы не передаем ваши персональные данные третьим лицам. "
+            "Они нужны только для обработки вашего заказа. Вы уверены, что не хотите продолжить?",
+            reply_markup=consent_keyboard  # Оставляем кнопки "Да", "Нет", "Посмотреть оферту"
+        )
+
 
 # Частые вопросы
 @dp.message(lambda message: message.text == "Частые вопросы")
