@@ -116,7 +116,11 @@ async def collect_answers_or_faq(message: types.Message):
                 f"{questions[i]}: {answer}" if i != 6 else "Прикрепленное фото"
                 for i, answer in enumerate(user_answers[chat_id])
             ])
+            # Отправляем текст анкеты админу
             await bot.send_message(ADMIN_ID, f"📩 Новая анкета от клиента:\n\n{answers_text}")
+            # Проверяем, есть ли фото (оно находится на 7-м месте в анкете)
+            if len(user_answers[chat_id]) > 6 and user_answers[chat_id][6].startswith("Ag"):  # file_id фото начинается с "Ag"
+                await bot.send_photo(ADMIN_ID, user_answers[chat_id][6], caption="Фото товара от клиента 📸")
             await message.answer("Спасибо! Мы свяжемся с вами в ближайшее время.")
             del user_answers[chat_id]
     else:
