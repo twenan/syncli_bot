@@ -20,6 +20,7 @@ dp = Dispatcher()
 ADMIN_ID = 219614301  # Telegram ID менеджера
 survey_id_counter = 1  # ID анкеты, начинается с 1
 
+# Вопросы в анкете
 questions = [
     "Ваше имя и фамилия",
     "Ваш ник в Telegram (через @)",
@@ -40,12 +41,14 @@ questions = [
 
 user_answers = {}
 
+# Ответы на вопросы
 faq = {
     "доставка": "Мы предлагаем доставку карго (10-13 дней, 15-18 дней, 25-30 дней) и авиа (от 1 дня). По белой доставке обратитесь к менеджеру.",
     "обрешетка": "Стоимость обрешетки - 30$ за метр кубический.",
     "оплата": "Мы принимаем оплату за наши услуги по безналичному расчету. Оплата за товар и логистику уточняется у менеджера."
 }
 
+# Клавиатура
 start_keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Заполнить анкету")],
@@ -65,25 +68,53 @@ delivery_keyboard = InlineKeyboardMarkup(
     ]
 )
 
-
+# Начало работы бота
 @dp.message(Command("start"))
 async def start(message: types.Message):
     logger.debug("Команда /start получена")
     await message.answer("Привет! Я помогу вам с заказом. Выберите действие:", reply_markup=start_keyboard)
 
-
+# Старт кнопки заполнение анкеты
 @dp.message(lambda message: message.text == "Заполнить анкету")
-async def start_survey(message: types.Message):
-    global survey_id_counter
+    await message.answer(
+        "Перед заполнением анкеты, пожалуйста, дайте согласие на обработку персональных данных.",
+        reply_markup=consent_keyboard
+    )
+
+ 
+@dp.message(lambda message: message.text in ["Да", "Нет", "Посмотреть оферту"])
+async def process_consent(message: types.Message):
     chat_id = message.chat.id
-    user_answers[chat_id] = {
-        "id": survey_id_counter,
-        "answers": []
-    }
-    survey_id_counter += 1
-    await message.answer(f"📝 Ваша анкета ID {user_answers[chat_id]['id']}.\n\n{questions[0]}")
+
+    if message.text == "Да":
+        global survey_id_counter
+        user_answers[chat_id] = {
+            "id": survey_id_counter,
+            "answers": []
+        }
+        survey_id_counter += 1
+        await message.answer(f"Спасибо за согласие! 📝 Ваша анкета ID {user_answers[chat_id]['id']}.\n\n{questions[0]}")
+    
+    elif message.text == "Посмотреть оферту":
+        await bot.send_document(chat_id, document=types.FSInputFile("offer.pdf"), caption="📄 Оферта на обработку персональных данных")
+        await message.answer("Ознакомьтесь с документом и выберите вариант.", reply_markup=consent_keyboard)
+
+    elif message.text == "Нет":
+        await message.answer(
+            "Мы не передаем ваши персональные данные третьим лицам. "
+            "Они нужны только для обработки вашего заказа. Вы уверены, что не хотите продолжить?",
+            reply_markup=consent_keyboard
+        )
+@dp.message(lambda message: message.text == "Нет")
+async def second_consent_decline(message: types.Message):
+    chat_id = message.chat.id
+    await message.answer(
+        "Тогда свяжитесь напрямую с менеджером: @YourManagerTelegram",
+        reply_markup=types.ReplyKeyboardRemove()
+    )
 
 
+# Старт кнопки Частые вопросы
 @dp.message(lambda message: message.text == "Частые вопросы")
 async def show_faq(message: types.Message):
     response = "📌 Часто задаваемые вопросы:\n\n"
@@ -92,7 +123,7 @@ async def show_faq(message: types.Message):
     response += "\nНапишите ваш вопрос, и я попробую ответить!"
     await message.answer(response)
 
-
+# Процесс обработки фото и файлов
 @dp.message(lambda message: message.photo or message.document)
 async def handle_file(message: types.Message):
     chat_id = message.chat.id
@@ -104,7 +135,7 @@ async def handle_file(message: types.Message):
     else:
         await message.answer("📎 Отправьте файл в процессе заполнения анкеты после соответствующего вопроса.")
 
-
+# Процесс обработки возврата к предыдущему вопросы в анкете
 @dp.message()
 async def collect_answers_or_faq(message: types.Message):
     chat_id = message.chat.id
@@ -119,6 +150,7 @@ async def collect_answers_or_faq(message: types.Message):
 
     text = message.text.lower()
 
+# Взаимодействие с групповыми чатами
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         logger.debug(f"Сообщение в группе ({message.chat.title}): {message.text}")
         for keyword, response in faq.items():
@@ -164,7 +196,7 @@ async def collect_answers_or_faq(message: types.Message):
         if message.chat.type == ChatType.PRIVATE:
             await message.answer("Я пока не знаю ответа на этот вопрос, но передам его менеджеру!")
 
-
+# Ответ после выбора срока доставки
 @dp.callback_query()
 async def delivery_selected(call: types.CallbackQuery):
     chat_id = call.message.chat.id
