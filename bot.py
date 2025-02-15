@@ -19,6 +19,7 @@ dp = Dispatcher()
 
 ADMIN_ID = 219614301  # Telegram ID менеджера
 survey_id_counter = 1  # ID анкеты, начинается с 1
+PDF_FILE_ID = "PASTE_YOUR_FILE_ID_HERE"  # Заменить на file_id PDF-файла с офертой
 
 questions = [
     "Ваше имя и фамилия",
@@ -46,6 +47,7 @@ faq = {
     "оплата": "Мы принимаем оплату за наши услуги по безналичному расчету. Оплата за товар и логистику уточняется у менеджера."
 }
 
+# Клавиатура для начала
 start_keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Заполнить анкету")],
@@ -53,6 +55,15 @@ start_keyboard = ReplyKeyboardMarkup(
         [KeyboardButton(text="Назад")]
     ],
     resize_keyboard=True
+)
+
+# Инлайн-клавиатура согласия на обработку данных
+consent_keyboard = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Да, согласен", callback_data="consent_yes")],
+        [InlineKeyboardButton(text="❌ Нет", callback_data="consent_no")],
+        [InlineKeyboardButton(text="📜 Прочитать оферту", callback_data="read_offer")]
+    ]
 )
 
 # Инлайн-клавиатура для выбора срока доставки
@@ -69,7 +80,45 @@ delivery_keyboard = InlineKeyboardMarkup(
 @dp.message(Command("start"))
 async def start(message: types.Message):
     logger.debug("Команда /start получена")
-    await message.answer("Привет! Я помогу вам с заказом. Выберите действие:", reply_markup=start_keyboard)
+    await message.answer(
+        "Перед началом заполнения анкеты, пожалуйста, дайте согласие на обработку персональных данных.",
+        reply_markup=consent_keyboard
+    )
+
+
+@dp.callback_query(lambda call: call.data == "consent_yes")
+async def consent_given(call: types.CallbackQuery):
+    await call.message.answer("✅ Спасибо! Вы можете приступить к заполнению анкеты.", reply_markup=start_keyboard)
+    await call.answer()
+
+
+@dp.callback_query(lambda call: call.data == "consent_no")
+async def consent_denied(call: types.CallbackQuery):
+    await call.message.answer(
+        "Мы не передаем ваши персональные данные третьим лицам.\n"
+        "Они нужны только для обработки вашего заказа менеджером.\n\n"
+        "Вы уверены, что отказываетесь?",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Да, согласен", callback_data="consent_yes")],
+            [InlineKeyboardButton(text="❌ Нет, связаться с менеджером", callback_data="final_no")]
+        ])
+    )
+    await call.answer()
+
+
+@dp.callback_query(lambda call: call.data == "final_no")
+async def final_denial(call: types.CallbackQuery):
+    await call.message.answer("📞 Пожалуйста, свяжитесь с менеджером напрямую: @your_manager_contact")
+    await call.answer()
+
+
+@dp.callback_query(lambda call: call.data == "read_offer")
+async def read_offer(call: types.CallbackQuery):
+    await call.message.answer_document(
+        document=PDF_FILE_ID,
+        caption="📜 Ознакомьтесь с нашей политикой конфиденциальности."
+    )
+    await call.answer()
 
 
 @dp.message(lambda message: message.text == "Заполнить анкету")
@@ -96,7 +145,6 @@ async def show_faq(message: types.Message):
 @dp.message(lambda message: message.photo or message.document)
 async def handle_file(message: types.Message):
     chat_id = message.chat.id
-
     if chat_id in user_answers and len(user_answers[chat_id]["answers"]) == 6:
         file_id = message.photo[-1].file_id if message.photo else message.document.file_id
         user_answers[chat_id]["answers"].append(file_id)
@@ -109,29 +157,11 @@ async def handle_file(message: types.Message):
 async def collect_answers_or_faq(message: types.Message):
     chat_id = message.chat.id
 
-    if message.text.lower() == "назад" and chat_id in user_answers and user_answers[chat_id]["answers"]:
-        user_answers[chat_id]["answers"].pop()
-        await message.answer(f"🔄 Введите новый ответ:\n\n{questions[len(user_answers[chat_id]['answers'])]}")
-        return
-
-    if not message.text:
-        return
-
-    text = message.text.lower()
-
-    if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
-        logger.debug(f"Сообщение в группе ({message.chat.title}): {message.text}")
-        for keyword, response in faq.items():
-            if any(word in text for word in keyword.lower().split()):
-                await message.reply(response)
-                return
-        return
-
     if chat_id in user_answers:
         user_answers[chat_id]["answers"].append(message.text)
 
         if len(user_answers[chat_id]["answers"]) < len(questions):
-            if len(user_answers[chat_id]["answers"]) == 12:  # Вопрос о сроке доставки
+            if len(user_answers[chat_id]["answers"]) == 12:
                 await message.answer("⏳ Выберите срок доставки:", reply_markup=delivery_keyboard)
             else:
                 await message.answer(questions[len(user_answers[chat_id]["answers"])])
@@ -140,38 +170,9 @@ async def collect_answers_or_faq(message: types.Message):
                 f"{questions[i]}: {answer}" if i != 6 else "Прикрепленный файл"
                 for i, answer in enumerate(user_answers[chat_id]["answers"])
             ])
-
-            await bot.send_message(
-                ADMIN_ID, 
-                f"📩 Новая анкета ID {user_answers[chat_id]['id']}:\n\n{answers_text}"
-            )
-
-            if len(user_answers[chat_id]["answers"]) > 6 and user_answers[chat_id]["answers"][6]:
-                await bot.send_document(
-                    ADMIN_ID, 
-                    user_answers[chat_id]["answers"][6], 
-                    caption=f"📎 Файл к анкете ID {user_answers[chat_id]['id']}"
-                )
-
+            await bot.send_message(ADMIN_ID, f"📩 Новая анкета ID {user_answers[chat_id]['id']}:\n\n{answers_text}")
             await message.answer("Спасибо! Мы свяжемся с вами в ближайшее время.")
             del user_answers[chat_id]
-    else:
-        for keyword, response in faq.items():
-            if any(word in text for word in keyword.lower().split()):
-                await message.answer(response)
-                return
-
-        if message.chat.type == ChatType.PRIVATE:
-            await message.answer("Я пока не знаю ответа на этот вопрос, но передам его менеджеру!")
-
-
-@dp.callback_query()
-async def delivery_selected(call: types.CallbackQuery):
-    chat_id = call.message.chat.id
-    if chat_id in user_answers:
-        user_answers[chat_id]["answers"].append(call.data)
-        await call.message.answer("✅ Срок доставки выбран. " + questions[len(user_answers[chat_id]['answers'])])
-    await call.answer()
 
 
 async def main():
