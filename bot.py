@@ -1,3 +1,4 @@
+@ -1,8 +1,7 @@
 import asyncio
 import requests
 import logging
@@ -8,8 +9,7 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMar
 from aiogram.filters import Command
 from aiogram.enums import ChatType
 from config import Config, load_config
-
-@@ -19,7 +18,9 @@ dp = Dispatcher()
+@ -19,7 +18,9 @@ dp = Dispatcher()
 
 ADMIN_ID = 219614301  # Telegram ID менеджера
 survey_id_counter = 1  # ID анкеты, начинается с 1
@@ -19,8 +19,7 @@ user_answers = {}
 questions = [
     "Ваше имя и фамилия",
     "Ваш ник в Telegram (через @)",
-
-@@ -38,13 +39,14 @@ questions = [
+@ -38,13 +39,14 @@ questions = [
     "Перечислите вопросы для поставщика (если есть, укажите здесь)"
 ]
 
@@ -38,8 +37,7 @@ faq = {
 start_keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Заполнить анкету")],
-
-@@ -54,14 +56,16 @@ start_keyboard = ReplyKeyboardMarkup(
+@ -54,14 +56,16 @@ start_keyboard = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
@@ -58,8 +56,7 @@ consent_keyboard = InlineKeyboardMarkup(
 delivery_keyboard = InlineKeyboardMarkup(
     inline_keyboard=[
         [InlineKeyboardButton(text="10-13 дней", callback_data="10-13")],
-
-@@ -71,32 +75,66 @@ delivery_keyboard = InlineKeyboardMarkup(
+@ -71,32 +75,66 @@ delivery_keyboard = InlineKeyboardMarkup(
     ]
 )
 
@@ -141,8 +138,7 @@ async def consent_denied_final(call: types.CallbackQuery):
 async def show_faq(message: types.Message):
     response = "📌 Часто задаваемые вопросы:\n\n"
     for keyword in faq:
-
-@@ -104,22 +142,65 @@ async def show_faq(message: types.Message):
+@ -104,22 +142,65 @@ async def show_faq(message: types.Message):
     response += "\nНапишите ваш вопрос, и я попробую ответить!"
     await message.answer(response)
 
