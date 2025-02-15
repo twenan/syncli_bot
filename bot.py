@@ -136,14 +136,43 @@ async def process_consent(call: types.CallbackQuery):
         )
 
 # 🔹 **СБОР ОТВЕТОВ В АНКЕТЕ**
+# **Обновленный участок кода: Обработка ответов в анкете**
 @dp.message()
 async def collect_answers_or_faq(message: types.Message):
     chat_id = message.chat.id
 
-    if chat_id in user_answers:
+    # Проверяем, если пользователь в процессе заполнения анкеты
+    if chat_id in user_answers and "answers" in user_answers[chat_id]:
         user_answers[chat_id]["answers"].append(message.text)
+
+        # Если еще остались вопросы
         if len(user_answers[chat_id]["answers"]) < len(questions):
-            await message
+            await message.answer(questions[len(user_answers[chat_id]["answers"])])  # Переход к следующему вопросу
+        else:
+            # Отправка анкеты менеджеру
+            answers_text = "\n".join([
+                f"{questions[i]}: {answer}" if i != 6 else "Прикрепленный файл"
+                for i, answer in enumerate(user_answers[chat_id]["answers"])
+            ])
+
+            await bot.send_message(
+                ADMIN_ID, 
+                f"📩 Новая анкета ID {user_answers[chat_id]['id']}:\n\n{answers_text}"
+            )
+
+            if len(user_answers[chat_id]["answers"]) > 6 and user_answers[chat_id]["answers"][6]:
+                await bot.send_document(
+                    ADMIN_ID, 
+                    user_answers[chat_id]["answers"][6], 
+                    caption=f"📎 Файл к анкете ID {user_answers[chat_id]['id']}"
+                )
+
+            await message.answer("Спасибо! Мы свяжемся с вами в ближайшее время.")
+            del user_answers[chat_id]  # Удаляем данные анкеты после завершения
+
+    else:
+        await message.answer("Чтобы заполнить анкету, нажмите 'Заполнить анкету' в меню.")
+
 
 # Частые вопросы
 @dp.message(lambda message: message.text == "Частые вопросы")
