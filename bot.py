@@ -75,6 +75,19 @@ async def show_faq(message: types.Message):
     response += "\nНапишите ваш вопрос, и я попробую ответить!"
     await message.answer(response)
 
+@dp.message(lambda message: message.photo)
+async def handle_photo(message: types.Message):
+    chat_id = message.chat.id
+
+    if chat_id in user_answers and len(user_answers[chat_id]) == 6:  # 6 - индекс вопроса "Прикрепите фото товара"
+        photo_file_id = message.photo[-1].file_id  # Берем фото в максимальном качестве
+        user_answers[chat_id].append(photo_file_id)  # Сохраняем фото как file_id
+        
+        await message.answer("Фото получено. " + questions[len(user_answers[chat_id])])
+    else:
+        await message.answer("Отправьте фото в процессе заполнения анкеты после соответствующего вопроса.")
+
+
 @dp.message()
 async def collect_answers_or_faq(message: types.Message):
     chat_id = message.chat.id
