@@ -68,16 +68,18 @@ consent_keyboard = InlineKeyboardMarkup(
 # Клавиатура выбора доставки
 delivery_keyboard = InlineKeyboardMarkup(
     inline_keyboard=[
-        [InlineKeyboardButton(text="10-13 дней", callback_data="10-13")],
-        [InlineKeyboardButton(text="15-18 дней", callback_data="15-18")],
-        [InlineKeyboardButton(text="25-30 дней", callback_data="25-30")],
-        [InlineKeyboardButton(text="Авиа", callback_data="avia")]
+        [InlineKeyboardButton(text="10-13 дней", callback_data="delivery_10_13")],
+        [InlineKeyboardButton(text="15-18 дней", callback_data="delivery_15_18")],
+        [InlineKeyboardButton(text="25-30 дней", callback_data="delivery_25_30")],
+        [InlineKeyboardButton(text="Авиа", callback_data="delivery_avia")]
     ]
 )
 
 @dp.callback_query(lambda call: call.data == "read_offer")
 async def send_offer(call: types.CallbackQuery):
     try:
+        await call.answer("Загрузка оферты...")
+        await asyncio.sleep(1)  # Исключение блокировки бота
         with open("offer.pdf", "rb") as file:
             await call.message.answer_document(file, caption="📄 Ознакомьтесь с офертой и выберите один из вариантов ниже.")
     except Exception as e:
@@ -85,10 +87,20 @@ async def send_offer(call: types.CallbackQuery):
         await call.message.answer("Ошибка загрузки оферты. Попробуйте позже.")
     await call.answer()
 
-@dp.callback_query(lambda call: call.data in ["10-13", "15-18", "25-30", "avia"])
+@dp.message(lambda message: message.photo or message.document)
+async def handle_file(message: types.Message):
+    chat_id = message.chat.id
+    if chat_id in user_answers and len(user_answers[chat_id]["answers"]) == 6:
+        file_id = message.photo[-1].file_id if message.photo else message.document.file_id
+        user_answers[chat_id]["answers"].append(file_id)
+        await message.answer(f"✅ Файл получен.\n\n{questions[len(user_answers[chat_id]['answers'])]}")
+    else:
+        await message.answer("📎 Отправьте файл в процессе заполнения анкеты после соответствующего вопроса.")
+
+@dp.callback_query(lambda call: call.data.startswith("delivery_"))
 async def handle_delivery_selection(call: types.CallbackQuery):
-    await call.message.answer(f"Вы выбрали срок доставки: {call.data} дней")
-    await call.answer()
+    await call.answer("Срок доставки выбран")
+    await call.message.answer(f"Вы выбрали срок доставки: {call.data.replace('delivery_', '').replace('_', '-')} дней")
 
 async def main():
     await dp.start_polling(bot)
