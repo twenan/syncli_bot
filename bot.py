@@ -54,6 +54,14 @@ start_keyboard = ReplyKeyboardMarkup(
     ],
     resize_keyboard=True
 )
+# Клавиатура для согласия на обработку персональных данных
+consent_keyboard = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Да"), KeyboardButton(text="Нет")],
+        [KeyboardButton(text="Посмотреть оферту")]
+    ],
+    resize_keyboard=True
+)
 
 # Инлайн-клавиатура для выбора срока доставки
 delivery_keyboard = InlineKeyboardMarkup(
@@ -73,6 +81,12 @@ async def start(message: types.Message):
 
 
 @dp.message(lambda message: message.text == "Заполнить анкету")
+async def request_consent(message: types.Message):
+    await message.answer(
+        "Перед заполнением анкеты, пожалуйста, дайте согласие на обработку персональных данных.",
+        reply_markup=consent_keyboard
+    )
+@dp.message(lambda message: message.text == "Да")
 async def start_survey(message: types.Message):
     global survey_id_counter
     chat_id = message.chat.id
@@ -81,8 +95,40 @@ async def start_survey(message: types.Message):
         "answers": []
     }
     survey_id_counter += 1
-    await message.answer(f"📝 Ваша анкета ID {user_answers[chat_id]['id']}.\n\n{questions[0]}")
+    await message.answer(f"Спасибо за согласие! 📝 Ваша анкета ID {user_answers[chat_id]['id']}.\n\n{questions[0]}")
 
+
+@dp.message(lambda message: message.text == "Посмотреть оферту")
+async def send_offer(message: types.Message):
+    await bot.send_document(
+        message.chat.id,
+        document=types.FSInputFile("/home/anna/syncli_bot/offer.pdf"),
+        caption="📄 Оферта на обработку персональных данных"
+    )
+    await message.answer("Ознакомьтесь с документом и выберите вариант.", reply_markup=consent_keyboard)
+
+
+@dp.message(lambda message: message.text == "Нет")
+async def process_decline(message: types.Message):
+    await message.answer(
+        "Мы не передаем ваши персональные данные третьим лицам. "
+        "Они нужны только для обработки вашего заказа. Вы уверены, что не хотите продолжить?",
+        reply_markup=consent_keyboard
+    )
+
+
+@dp.message(lambda message: message.text == "Нет")
+async def second_consent_decline(message: types.Message):
+    await message.answer(
+        "Тогда свяжитесь напрямую с менеджером: @YourManagerTelegram",
+        reply_markup=types.ReplyKeyboardRemove()
+@dp.message(lambda message: message.text == "Нет")
+async def second_consent_decline(message: types.Message):
+    chat_id = message.chat.id
+    await message.answer(
+        "Тогда свяжитесь напрямую с менеджером: @YourManagerTelegram",
+        reply_markup=types.ReplyKeyboardRemove()
+    )
 
 @dp.message(lambda message: message.text == "Частые вопросы")
 async def show_faq(message: types.Message):
@@ -170,7 +216,9 @@ async def delivery_selected(call: types.CallbackQuery):
     chat_id = call.message.chat.id
     if chat_id in user_answers:
         user_answers[chat_id]["answers"].append(call.data)
-        await call.message.answer("✅ Срок доставки выбран. " + questions[len(user_answers[chat_id]['answers'])])
+        await call.message.answer(
+            "✅ Срок доставки выбран. " + questions[len(user_answers[chat_id]['answers'])]
+        )
     await call.answer()
 
 
