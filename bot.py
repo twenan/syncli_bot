@@ -2,7 +2,7 @@ import asyncio
 import logging
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.filters import Command, CallbackQuery
+from aiogram.filters import Command
 from aiogram.enums import ChatType
 from config import Config, load_config
 
@@ -75,13 +75,13 @@ delivery_keyboard = InlineKeyboardMarkup(
     ]
 )
 
-
+### **ОБРАБОТКА КОМАНДЫ /START**
 @dp.message(Command("start"))
 async def start(message: types.Message):
     logger.debug("Команда /start получена")
     await message.answer("Привет! Я помогу вам с заказом. Выберите действие:", reply_markup=start_keyboard)
 
-
+### **ОБРАБОТКА КНОПКИ "Заполнить анкету"**
 @dp.message(lambda message: message.text == "Заполнить анкету")
 async def start_survey(message: types.Message):
     await message.answer(
@@ -89,7 +89,7 @@ async def start_survey(message: types.Message):
         reply_markup=consent_keyboard
     )
 
-
+### **ОБРАБОТКА КНОПКИ "Прочитать оферту"**
 @dp.callback_query(lambda call: call.data == "read_offer")
 async def send_offer(call: types.CallbackQuery):
     try:
@@ -99,7 +99,7 @@ async def send_offer(call: types.CallbackQuery):
         await call.message.answer("Ошибка: файл оферты не найден.")
     await call.answer()
 
-
+### **ОБРАБОТКА СОГЛАСИЯ**
 @dp.callback_query(lambda call: call.data == "consent_yes")
 async def consent_given(call: types.CallbackQuery):
     global survey_id_counter
@@ -112,7 +112,7 @@ async def consent_given(call: types.CallbackQuery):
     await call.message.answer(f"📝 Ваша анкета ID {user_answers[chat_id]['id']}.\n\n{questions[0]}")
     await call.answer()
 
-
+### **ОБРАБОТКА ОТКАЗА ОТ СОГЛАСИЯ**
 @dp.callback_query(lambda call: call.data == "consent_no_1")
 async def consent_denied_once(call: types.CallbackQuery):
     await call.message.answer(
@@ -128,15 +128,7 @@ async def consent_denied_once(call: types.CallbackQuery):
     )
     await call.answer()
 
-
-@dp.callback_query(lambda call: call.data == "consent_no_2")
-async def consent_denied_final(call: types.CallbackQuery):
-    await call.message.answer(
-        "Тогда мы просим вас связаться напрямую с менеджером: @manager_contact"
-    )
-    await call.answer()
-
-
+### **ОБРАБОТКА ВЫБОРА ДОСТАВКИ**
 @dp.callback_query(lambda call: call.data.startswith("delivery_"))
 async def delivery_selected(call: types.CallbackQuery):
     chat_id = call.message.chat.id
@@ -145,7 +137,19 @@ async def delivery_selected(call: types.CallbackQuery):
         await call.message.answer("✅ Срок доставки выбран. " + questions[len(user_answers[chat_id]['answers'])])
     await call.answer()
 
+### **ОБРАБОТКА ФОТО И ФАЙЛОВ**
+@dp.message(lambda message: message.photo or message.document)
+async def handle_file(message: types.Message):
+    chat_id = message.chat.id
 
+    if chat_id in user_answers and len(user_answers[chat_id]["answers"]) == 6:
+        file_id = message.photo[-1].file_id if message.photo else message.document.file_id
+        user_answers[chat_id]["answers"].append(file_id)
+        await message.answer(f"✅ Файл получен.\n\n{questions[len(user_answers[chat_id]['answers'])]}")
+    else:
+        await message.answer("📎 Отправьте файл в процессе заполнения анкеты после соответствующего вопроса.")
+
+### **ОБРАБОТКА ЧАСТЫХ ВОПРОСОВ**
 @dp.message(lambda message: message.text == "Частые вопросы")
 async def show_faq(message: types.Message):
     response = "📌 Часто задаваемые вопросы:\n\n"
@@ -154,33 +158,9 @@ async def show_faq(message: types.Message):
     response += "\nНапишите ваш вопрос, и я попробую ответить!"
     await message.answer(response)
 
-
-@dp.message()
-async def collect_answers_or_faq(message: types.Message):
-    chat_id = message.chat.id
-
-    if message.text.lower() == "главное меню":
-        await message.answer("🔄 Главное меню", reply_markup=start_keyboard)
-        return
-
-    if chat_id in user_answers:
-        user_answers[chat_id]["answers"].append(message.text)
-
-        if len(user_answers[chat_id]["answers"]) < len(questions):
-            if len(user_answers[chat_id]["answers"]) == 12:
-                await message.answer("⏳ Выберите срок доставки:", reply_markup=delivery_keyboard)
-            else:
-                await message.answer(questions[len(user_answers[chat_id]["answers"])])
-        else:
-            await bot.send_message(ADMIN_ID, f"📩 Новая анкета ID {user_answers[chat_id]['id']} получена.")
-
-            await message.answer("Спасибо! Мы свяжемся с вами в ближайшее время.")
-            del user_answers[chat_id]
-
-
+### **ЗАПУСК БОТА**
 async def main():
     await dp.start_polling(bot)
-
 
 if __name__ == '__main__':
     asyncio.run(main())
