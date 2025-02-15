@@ -2,7 +2,7 @@ import asyncio
 import logging
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.filters import Command
+from aiogram.filters import Command, CallbackQuery
 from aiogram.enums import ChatType
 from config import Config, load_config
 
@@ -68,42 +68,119 @@ consent_keyboard = InlineKeyboardMarkup(
 # Клавиатура выбора доставки
 delivery_keyboard = InlineKeyboardMarkup(
     inline_keyboard=[
-        [InlineKeyboardButton(text="10-13 дней", callback_data="delivery_10_13")],
-        [InlineKeyboardButton(text="15-18 дней", callback_data="delivery_15_18")],
-        [InlineKeyboardButton(text="25-30 дней", callback_data="delivery_25_30")],
+        [InlineKeyboardButton(text="10-13 дней", callback_data="delivery_10-13")],
+        [InlineKeyboardButton(text="15-18 дней", callback_data="delivery_15-18")],
+        [InlineKeyboardButton(text="25-30 дней", callback_data="delivery_25-30")],
         [InlineKeyboardButton(text="Авиа", callback_data="delivery_avia")]
     ]
 )
 
+
+@dp.message(Command("start"))
+async def start(message: types.Message):
+    logger.debug("Команда /start получена")
+    await message.answer("Привет! Я помогу вам с заказом. Выберите действие:", reply_markup=start_keyboard)
+
+
+@dp.message(lambda message: message.text == "Заполнить анкету")
+async def start_survey(message: types.Message):
+    await message.answer(
+        "Перед началом анкеты, пожалуйста, дайте согласие на обработку персональных данных.",
+        reply_markup=consent_keyboard
+    )
+
+
 @dp.callback_query(lambda call: call.data == "read_offer")
 async def send_offer(call: types.CallbackQuery):
     try:
-        await call.answer("Загрузка оферты...")
-        await asyncio.sleep(1)  # Исключение блокировки бота
         with open("offer.pdf", "rb") as file:
             await call.message.answer_document(file, caption="📄 Ознакомьтесь с офертой и выберите один из вариантов ниже.")
-    except Exception as e:
-        logger.error(f"Ошибка отправки оферты: {e}")
-        await call.message.answer("Ошибка загрузки оферты. Попробуйте позже.")
+    except FileNotFoundError:
+        await call.message.answer("Ошибка: файл оферты не найден.")
     await call.answer()
 
-@dp.message(lambda message: message.photo or message.document)
-async def handle_file(message: types.Message):
-    chat_id = message.chat.id
-    if chat_id in user_answers and len(user_answers[chat_id]["answers"]) == 6:
-        file_id = message.photo[-1].file_id if message.photo else message.document.file_id
-        user_answers[chat_id]["answers"].append(file_id)
-        await message.answer(f"✅ Файл получен.\n\n{questions[len(user_answers[chat_id]['answers'])]}")
-    else:
-        await message.answer("📎 Отправьте файл в процессе заполнения анкеты после соответствующего вопроса.")
+
+@dp.callback_query(lambda call: call.data == "consent_yes")
+async def consent_given(call: types.CallbackQuery):
+    global survey_id_counter
+    chat_id = call.message.chat.id
+    user_answers[chat_id] = {
+        "id": survey_id_counter,
+        "answers": []
+    }
+    survey_id_counter += 1
+    await call.message.answer(f"📝 Ваша анкета ID {user_answers[chat_id]['id']}.\n\n{questions[0]}")
+    await call.answer()
+
+
+@dp.callback_query(lambda call: call.data == "consent_no_1")
+async def consent_denied_once(call: types.CallbackQuery):
+    await call.message.answer(
+        "Мы не собираемся передавать ваши персональные данные третьим лицам.\n"
+        "Это лишь нужно для того, чтобы менеджер смог обработать ваш заказ.\n"
+        "Вы готовы дать согласие?",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="✅ Да", callback_data="consent_yes")],
+                [InlineKeyboardButton(text="❌ Нет", callback_data="consent_no_2")]
+            ]
+        )
+    )
+    await call.answer()
+
+
+@dp.callback_query(lambda call: call.data == "consent_no_2")
+async def consent_denied_final(call: types.CallbackQuery):
+    await call.message.answer(
+        "Тогда мы просим вас связаться напрямую с менеджером: @manager_contact"
+    )
+    await call.answer()
+
 
 @dp.callback_query(lambda call: call.data.startswith("delivery_"))
-async def handle_delivery_selection(call: types.CallbackQuery):
-    await call.answer("Срок доставки выбран")
-    await call.message.answer(f"Вы выбрали срок доставки: {call.data.replace('delivery_', '').replace('_', '-')} дней")
+async def delivery_selected(call: types.CallbackQuery):
+    chat_id = call.message.chat.id
+    if chat_id in user_answers:
+        user_answers[chat_id]["answers"].append(call.data.replace("delivery_", ""))
+        await call.message.answer("✅ Срок доставки выбран. " + questions[len(user_answers[chat_id]['answers'])])
+    await call.answer()
+
+
+@dp.message(lambda message: message.text == "Частые вопросы")
+async def show_faq(message: types.Message):
+    response = "📌 Часто задаваемые вопросы:\n\n"
+    for keyword in faq:
+        response += f"👉 {keyword.capitalize()}\n"
+    response += "\nНапишите ваш вопрос, и я попробую ответить!"
+    await message.answer(response)
+
+
+@dp.message()
+async def collect_answers_or_faq(message: types.Message):
+    chat_id = message.chat.id
+
+    if message.text.lower() == "главное меню":
+        await message.answer("🔄 Главное меню", reply_markup=start_keyboard)
+        return
+
+    if chat_id in user_answers:
+        user_answers[chat_id]["answers"].append(message.text)
+
+        if len(user_answers[chat_id]["answers"]) < len(questions):
+            if len(user_answers[chat_id]["answers"]) == 12:
+                await message.answer("⏳ Выберите срок доставки:", reply_markup=delivery_keyboard)
+            else:
+                await message.answer(questions[len(user_answers[chat_id]["answers"])])
+        else:
+            await bot.send_message(ADMIN_ID, f"📩 Новая анкета ID {user_answers[chat_id]['id']} получена.")
+
+            await message.answer("Спасибо! Мы свяжемся с вами в ближайшее время.")
+            del user_answers[chat_id]
+
 
 async def main():
     await dp.start_polling(bot)
+
 
 if __name__ == '__main__':
     asyncio.run(main())
