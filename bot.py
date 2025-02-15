@@ -7,6 +7,7 @@ from aiogram.filters import Command
 from aiogram.enums import ChatType
 from config import Config, load_config
 
+
 # Настройка логирования
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -58,16 +59,20 @@ start_keyboard = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
-# Инлайн-клавиатура для согласия на обработку персональных данных
+# 🔹 **ИНКЛАЙН-КЛАВИАТУРА ДЛЯ ОФЕРТЫ**
 consent_keyboard = InlineKeyboardMarkup(
     inline_keyboard=[
-        [
-            InlineKeyboardButton(text="✅ Да", callback_data="consent_yes"),
-            InlineKeyboardButton(text="❌ Нет", callback_data="consent_no")
-        ],
-        [
-            InlineKeyboardButton(text="📄 Посмотреть оферту", callback_data="view_offer")
-        ]
+        [InlineKeyboardButton(text="✅ Да", callback_data="consent_yes")],
+        [InlineKeyboardButton(text="❌ Нет", callback_data="consent_no")],
+        [InlineKeyboardButton(text="📄 Посмотреть оферту", callback_data="view_offer")]
+    ]
+)
+
+# 🔹 **ИНКЛАЙН-КЛАВИАТУРА ДЛЯ ВТОРОГО ШАНСА**
+consent_second_keyboard = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Да", callback_data="consent_yes")],
+        [InlineKeyboardButton(text="❌ Нет", callback_data="final_no")]
     ]
 )
 
@@ -87,7 +92,7 @@ async def start(message: types.Message):
     logger.debug("Команда /start получена")
     await message.answer("Привет! Я помогу вам с заказом. Выберите действие:", reply_markup=start_keyboard)
 
-# Запрос на согласие перед анкетой
+    # 🔹 **ЗАПРОС НА СОГЛАСИЕ ПЕРЕД АНКЕТОЙ**
 @dp.message(lambda message: message.text == "Заполнить анкету")
 async def request_consent(message: types.Message):
     await message.answer(
@@ -95,12 +100,13 @@ async def request_consent(message: types.Message):
         reply_markup=consent_keyboard
     )
 
-
-@dp.callback_query(lambda call: call.data in ["consent_yes", "consent_no", "view_offer"])
+# 🔹 **ОБРАБОТКА ВЫБОРА ПОЛЬЗОВАТЕЛЯ (ДА / НЕТ / ПОСМОТРЕТЬ ОФЕРТУ)**
+@dp.callback_query(lambda call: call.data in ["consent_yes", "consent_no", "view_offer", "final_no"])
 async def process_consent(call: types.CallbackQuery):
     chat_id = call.message.chat.id
 
     if call.data == "consent_yes":
+        # Начинаем анкету
         global survey_id_counter
         user_answers[chat_id] = {
             "id": survey_id_counter,
@@ -108,40 +114,36 @@ async def process_consent(call: types.CallbackQuery):
         }
         survey_id_counter += 1
         await call.message.edit_text(f"Спасибо за согласие! 📝 Ваша анкета ID {user_answers[chat_id]['id']}.\n\n{questions[0]}")
-
+    
     elif call.data == "view_offer":
+        # Отправляем оферту и снова предлагаем выбор
         await bot.send_document(chat_id, document=types.FSInputFile("/home/anna/syncli_bot/offer.pdf"), caption="📄 Оферта на обработку персональных данных")
         await call.message.edit_text("Ознакомьтесь с документом и выберите вариант.", reply_markup=consent_keyboard)
 
     elif call.data == "consent_no":
+        # Предлагаем еще раз подумать
         await call.message.edit_text(
             "Мы не передаем ваши персональные данные третьим лицам. "
             "Они нужны только для обработки вашего заказа. Вы уверены, что не хотите продолжить?",
-            reply_markup=consent_keyboard
+            reply_markup=consent_second_keyboard  # Показываем вторую инлайн-клавиатуру
         )
 
+    elif call.data == "final_no":
+        # Если пользователь снова отказался
+        await call.message.edit_text(
+            "Тогда свяжитесь напрямую с менеджером: @YourManagerTelegram",
+            reply_markup=None  # Убираем только инлайн-клавиатуру, но меню остается
+        )
 
-# Если второй раз "Нет" — ссылка на менеджера
-@dp.message(lambda message: message.text == "Нет")
-async def process_consent_decline(message: types.Message):
+# 🔹 **СБОР ОТВЕТОВ В АНКЕТЕ**
+@dp.message()
+async def collect_answers_or_faq(message: types.Message):
     chat_id = message.chat.id
 
-    # Если пользователь уже отказался один раз — предлагаем связаться с менеджером
-    if chat_id in user_answers and user_answers[chat_id].get("declined_once", False):
-        await message.answer(
-            "Тогда свяжитесь напрямую с менеджером: @YourManagerTelegram",
-            reply_markup=start_keyboard  # Оставляем клавиатуру
-        )
-        del user_answers[chat_id]  # Удаляем пользователя из списка
-    else:
-        # Первый отказ — предлагаем подумать еще раз
-        user_answers[chat_id] = {"declined_once": True}  # Запоминаем отказ
-        await message.answer(
-            "Мы не передаем ваши персональные данные третьим лицам. "
-            "Они нужны только для обработки вашего заказа. Вы уверены, что не хотите продолжить?",
-            reply_markup=consent_keyboard  # Оставляем кнопки "Да", "Нет", "Посмотреть оферту"
-        )
-
+    if chat_id in user_answers:
+        user_answers[chat_id]["answers"].append(message.text)
+        if len(user_answers[chat_id]["answers"]) < len(questions):
+            await message
 
 # Частые вопросы
 @dp.message(lambda message: message.text == "Частые вопросы")
