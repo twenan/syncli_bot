@@ -1,5 +1,4 @@
 import asyncio
-import requests
 import logging
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import (
@@ -7,6 +6,8 @@ from aiogram.types import (
 )
 from aiogram.filters import Command
 from aiogram.enums import ChatType
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from config import Config, load_config
 
 # Настройка логирования
@@ -21,7 +22,14 @@ dp = Dispatcher()
 
 ADMIN_ID = 219614301  # Telegram ID менеджера
 survey_id_counter = 1  # ID анкеты, начинается с 1
+user_answers = {}
 
+# Определяем состояния для FSM
+class SurveyState(StatesGroup):
+    waiting_for_consent = State()
+    filling_survey = State()
+
+# Вопросы анкеты
 questions = [
     "Ваше имя и фамилия",
     "Ваш ник в Telegram (через @)",
@@ -40,15 +48,7 @@ questions = [
     "Перечислите вопросы для поставщика (если есть, укажите здесь)"
 ]
 
-user_answers = {}
-
-faq = {
-    "доставка": "Мы предлагаем доставку карго (10-13 дней, 15-18 дней, 25-30 дней) и авиа (от 1 дня). По белой доставке обратитесь к менеджеру.",
-    "обрешетка": "Стоимость обрешетки - 30$ за метр кубический.",
-    "оплата": "Мы принимаем оплату за наши услуги по безналичному расчету. Оплата за товар и логистику уточняется у менеджера."
-}
-
-# Клавиатура для согласия на обработку персональных данных
+# Клавиатура для согласия на обработку данных
 consent_keyboard = InlineKeyboardMarkup(
     inline_keyboard=[
         [InlineKeyboardButton(text="✅ Да", callback_data="consent_yes")],
@@ -77,15 +77,14 @@ delivery_keyboard = InlineKeyboardMarkup(
     ]
 )
 
-
 @dp.message(Command("start"))
-async def start(message: types.Message):
+async def start(message: types.Message, state: FSMContext):
+    await state.set_state(SurveyState.waiting_for_consent)
     logger.debug("Команда /start получена")
     await message.answer(
         "Прежде чем продолжить, пожалуйста, подтвердите согласие на обработку персональных данных.",
         reply_markup=consent_keyboard
     )
-
 
 @dp.callback_query(lambda c: c.data == "read_offer")
 async def send_offer(call: types.CallbackQuery):
@@ -94,11 +93,10 @@ async def send_offer(call: types.CallbackQuery):
         caption="📜 Ознакомьтесь с офертой."
     )
 
-
 @dp.callback_query(lambda c: c.data == "consent_yes")
-async def consent_yes(call: types.CallbackQuery):
+async def consent_yes(call: types.CallbackQuery, state: FSMContext):
+    await state.set_state(SurveyState.filling_survey)
     await call.message.answer("✅ Спасибо! Теперь вы можете заполнить анкету.", reply_markup=start_keyboard)
-
 
 @dp.callback_query(lambda c: c.data == "consent_no")
 async def consent_no(call: types.CallbackQuery):
@@ -114,14 +112,17 @@ async def consent_no(call: types.CallbackQuery):
         )
     )
 
-
 @dp.callback_query(lambda c: c.data == "contact_manager")
 async def contact_manager(call: types.CallbackQuery):
     await call.message.answer("🔹 Свяжитесь с менеджером: @ВашМенеджер")
 
-
 @dp.message(lambda message: message.text == "Заполнить анкету")
-async def start_survey(message: types.Message):
+async def start_survey(message: types.Message, state: FSMContext):
+    current_state = await state.get_state()
+    if current_state != SurveyState.filling_survey:
+        await message.answer("❗ Сначала подтвердите согласие на обработку персональных данных!")
+        return
+
     global survey_id_counter
     chat_id = message.chat.id
     user_answers[chat_id] = {
@@ -131,16 +132,7 @@ async def start_survey(message: types.Message):
     survey_id_counter += 1
     await message.answer(f"📝 Ваша анкета ID {user_answers[chat_id]['id']}.\n\n{questions[0]}")
 
-
-@dp.message(lambda message: message.text == "Частые вопросы")
-async def show_faq(message: types.Message):
-    response = "📌 Часто задаваемые вопросы:\n\n"
-    for keyword in faq:
-        response += f"👉 {keyword.capitalize()}\n"
-    response += "\nНапишите ваш вопрос, и я попробую ответить!"
-    await message.answer(response)
-
-
+# 📷 Обработка фото и файлов
 @dp.message(lambda message: message.photo or message.document)
 async def handle_file(message: types.Message):
     chat_id = message.chat.id
@@ -151,7 +143,6 @@ async def handle_file(message: types.Message):
         await message.answer(f"✅ Файл получен.\n\n{questions[len(user_answers[chat_id]['answers'])]}")
     else:
         await message.answer("📎 Отправьте файл в процессе заполнения анкеты после соответствующего вопроса.")
-
 
 @dp.message()
 async def collect_answers_or_faq(message: types.Message):
@@ -167,19 +158,11 @@ async def collect_answers_or_faq(message: types.Message):
 
     text = message.text.lower()
 
-    if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
-        logger.debug(f"Сообщение в группе ({message.chat.title}): {message.text}")
-        for keyword, response in faq.items():
-            if any(word in text for word in keyword.lower().split()):
-                await message.reply(response)
-                return
-        return
-
     if chat_id in user_answers:
         user_answers[chat_id]["answers"].append(message.text)
 
         if len(user_answers[chat_id]["answers"]) < len(questions):
-            if len(user_answers[chat_id]["answers"]) == 12:
+            if len(user_answers[chat_id]["answers"]) == 12:  # Вопрос о сроке доставки
                 await message.answer("⏳ Выберите срок доставки:", reply_markup=delivery_keyboard)
             else:
                 await message.answer(questions[len(user_answers[chat_id]["answers"])])
@@ -189,15 +172,23 @@ async def collect_answers_or_faq(message: types.Message):
                 for i, answer in enumerate(user_answers[chat_id]["answers"])
             ])
 
-            await bot.send_message(ADMIN_ID, f"📩 Новая анкета ID {user_answers[chat_id]['id']}:\n\n{answers_text}")
+            await bot.send_message(
+                ADMIN_ID, 
+                f"📩 Новая анкета ID {user_answers[chat_id]['id']}:\n\n{answers_text}"
+            )
+
+            if len(user_answers[chat_id]["answers"]) > 6 and user_answers[chat_id]["answers"][6]:
+                await bot.send_document(
+                    ADMIN_ID, 
+                    user_answers[chat_id]["answers"][6], 
+                    caption=f"📎 Файл к анкете ID {user_answers[chat_id]['id']}"
+                )
 
             await message.answer("Спасибо! Мы свяжемся с вами в ближайшее время.")
             del user_answers[chat_id]
 
-
 async def main():
     await dp.start_polling(bot)
-
 
 if __name__ == '__main__':
     asyncio.run(main())
