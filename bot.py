@@ -91,7 +91,13 @@ async def handle_photo(message: types.Message):
 @dp.message()
 async def collect_answers_or_faq(message: types.Message):
     chat_id = message.chat.id
+
+    # Проверяем, есть ли текст в сообщении
+    if not message.text:
+        return  # Если нет текста (например, фото, документ), просто игнорируем
+
     text = message.text.lower()
+
     
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         logger.debug(f"Сообщение в группе ({message.chat.title}): {message.text}")
