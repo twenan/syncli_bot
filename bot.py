@@ -1,8 +1,8 @@
 import asyncio
 import requests
 import logging
-from aiogram import Bot, Dispatcher, types
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 from aiogram.filters import Command
 from aiogram.enums import ChatType
 from config import Config, load_config
@@ -39,18 +39,17 @@ questions = [
 ]
 
 user_answers = {}
-
 faq = {
-    "доставка": "Мы предлагаем доставку карго (10-13 дней, 15-18 дней, 25-30 дней) и авиа (от 1 дня). По белой доставке обратитесь к менеджеру.",
+    "доставка": "Мы предлагаем доставку карго (10-13 дней, 15-18 дней, 25-30 дней) и авиа (от 1 дня).",
     "обрешетка": "Стоимость обрешетки - 30$ за метр кубический.",
-    "оплата": "Мы принимаем оплату за наши услуги по безналичному расчету. Оплата за товар и логистику уточняется у менеджера."
+    "оплата": "Оплата за услуги по безналичному расчету. Оплата за товар и логистику уточняется у менеджера."
 }
 
 start_keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Заполнить анкету")],
         [KeyboardButton(text="Частые вопросы")],
-        [KeyboardButton(text="Назад")]
+        [KeyboardButton(text="Главное меню")]
     ],
     resize_keyboard=True
 )
@@ -74,50 +73,50 @@ delivery_keyboard = InlineKeyboardMarkup(
 
 @dp.message(Command("start"))
 async def start(message: types.Message):
-    logger.debug("Команда /start получена")
     await message.answer("Привет! Я помогу вам с заказом. Выберите действие:", reply_markup=start_keyboard)
 
-@dp.message(lambda message: message.text == "Заполнить анкету")
-async def ask_consent(message: types.Message):
-    await message.answer(
-        "Перед началом анкеты, пожалуйста, дайте согласие на обработку персональных данных.",
-        reply_markup=consent_keyboard
-    )
+@dp.message(F.text == "Заполнить анкету")
+async def request_consent(message: types.Message):
+    await message.answer("Прежде чем продолжить, согласны ли вы с обработкой персональных данных?", reply_markup=consent_keyboard)
 
-@dp.callback_query(lambda call: call.data == "consent_yes")
-async def consent_yes(call: types.CallbackQuery):
+@dp.callback_query(F.data == "read_offer")
+async def send_offer(call: types.CallbackQuery):
+    await call.message.answer_document(FSInputFile("offer.pdf"), caption="📄 Оферта по обработке персональных данных")
+
+@dp.callback_query(F.data == "consent_no")
+async def reject_consent(call: types.CallbackQuery):
+    await call.message.answer("Мы не передаем ваши данные третьим лицам. Это нужно лишь для обработки заказа. Согласны?", reply_markup=consent_keyboard)
+
+@dp.callback_query(F.data == "consent_yes")
+async def start_survey(call: types.CallbackQuery):
     global survey_id_counter
     chat_id = call.message.chat.id
-    user_answers[chat_id] = {
-        "id": survey_id_counter,
-        "answers": []
-    }
+    user_answers[chat_id] = {"id": survey_id_counter, "answers": []}
     survey_id_counter += 1
-    await call.message.answer(f"📝 Ваша анкета ID {user_answers[chat_id]['id']}.")
+    await call.message.answer(f"📝 Ваша анкета ID {user_answers[chat_id]['id']}.", reply_markup=start_keyboard)
     await call.message.answer(questions[0])
-    await call.answer()
 
-@dp.callback_query(lambda call: call.data == "consent_no")
-async def consent_no(call: types.CallbackQuery):
-    await call.message.answer(
-        "Мы не собираемся передавать ваши персональные данные третьим лицам. Они нужны только для обработки вашего заказа менеджером.\n\n"
-        "❓ Все равно не согласны? Тогда мы просим вас связаться напрямую с менеджером: @your_manager"
-    )
-    await call.answer()
+@dp.message(F.text == "Частые вопросы")
+async def show_faq(message: types.Message):
+    response = "📌 Часто задаваемые вопросы:\n\n"
+    for keyword in faq:
+        response += f"👉 {keyword.capitalize()}\n"
+    response += "\nНапишите ваш вопрос, и я попробую ответить!"
+    await message.answer(response)
 
-@dp.callback_query(lambda call: call.data == "read_offer")
-async def send_offer(call: types.CallbackQuery):
-    with open("offer.pdf", "rb") as file:
-        await call.message.answer_document(file, caption="📄 Оферта на обработку персональных данных")
-    await call.answer()
+@dp.message(F.text == "Главное меню")
+async def main_menu(message: types.Message):
+    await message.answer("Выберите действие:", reply_markup=start_keyboard)
 
-@dp.callback_query()
-async def delivery_selected(call: types.CallbackQuery):
-    chat_id = call.message.chat.id
-    if chat_id in user_answers:
-        user_answers[chat_id]["answers"].append(call.data)
-        await call.message.answer("✅ Срок доставки выбран. " + questions[len(user_answers[chat_id]['answers'])])
-    await call.answer()
+@dp.message(F.photo | F.document)
+async def handle_file(message: types.Message):
+    chat_id = message.chat.id
+    if chat_id in user_answers and len(user_answers[chat_id]["answers"]) == 6:
+        file_id = message.photo[-1].file_id if message.photo else message.document.file_id
+        user_answers[chat_id]["answers"].append(file_id)
+        await message.answer(f"✅ Файл получен. {questions[len(user_answers[chat_id]['answers'])]}")
+    else:
+        await message.answer("📎 Отправьте файл в процессе заполнения анкеты после соответствующего вопроса.")
 
 async def main():
     await dp.start_polling(bot)
