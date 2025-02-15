@@ -86,6 +86,8 @@ async def handle_photo(message: types.Message):
         await message.answer("Фото получено. " + questions[len(user_answers[chat_id])])
     else:
         await message.answer("Отправьте фото в процессе заполнения анкеты после соответствующего вопроса.")
+        # **Логируем фото (для проверки)**
+        logging.info(f"Сохранено фото: {photo_file_id}")
 
 
 @dp.message()
