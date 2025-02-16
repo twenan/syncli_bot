@@ -163,7 +163,7 @@ async def show_faq(message: types.Message):
 
     await message.answer(response)
 
-# 📎 Прикрепление фото и документов + отправка админу
+# 📎 Прикрепление фото и документов (отправка админу только в конце анкеты)
 @dp.message(lambda message: message.photo or message.document)
 async def handle_file(message: types.Message):
     chat_id = message.chat.id
@@ -172,22 +172,22 @@ async def handle_file(message: types.Message):
         file_id = message.photo[-1].file_id if message.photo else message.document.file_id
         user_answers[chat_id]["answers"].append(file_id)
 
-        # Отправляем подтверждение пользователю
         await message.answer(f"✅ Файл получен.\n\n{questions[len(user_answers[chat_id]['answers'])]}")
-
-        # Отправляем файл админу
-        if message.photo:
-            await bot.send_photo(ADMIN_ID, file_id, caption=f"📎 Фото от клиента (Анкета ID {user_answers[chat_id]['id']})")
-        elif message.document:
-            await bot.send_document(ADMIN_ID, file_id, caption=f"📎 Файл от клиента (Анкета ID {user_answers[chat_id]['id']})")
     else:
         await message.answer("📎 Отправьте файл в процессе заполнения анкеты после соответствующего вопроса.")
+
 
 
 # 🔄 Обработка ответов анкеты и FAQ
 @dp.message()
 async def collect_answers_or_faq(message: types.Message):
     chat_id = message.chat.id
+
+        # Проверяем, если сообщение - это частый вопрос
+    for keyword, response in faq.items():
+        if keyword.lower() in message.text.lower():
+            await message.answer(response)
+            return  # Выход из функции, чтобы не засчитало как ответ на анкету
 
     # Если пользователь хочет вернуться назад в анкете
     if message.text.lower() == "назад" and chat_id in user_answers and user_answers[chat_id]["answers"]:
@@ -230,11 +230,12 @@ async def collect_answers_or_faq(message: types.Message):
                 f"📩 Новая анкета ID {user_answers[chat_id]['id']}:\n\n{answers_text}"
             )
 
-            # Отправляем прикрепленный файл админу, если он есть
+           # Отправляем прикрепленный файл админу **в конце анкеты**
             if len(user_answers[chat_id]["answers"]) > 6 and user_answers[chat_id]["answers"][6]:
+                file_id = user_answers[chat_id]["answers"][6]
                 await bot.send_document(
                     ADMIN_ID, 
-                    user_answers[chat_id]["answers"][6], 
+                    file_id, 
                     caption=f"📎 Файл к анкете ID {user_answers[chat_id]['id']}"
                 )
 
