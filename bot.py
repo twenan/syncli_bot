@@ -147,16 +147,23 @@ async def start_survey(message: types.Message):
     survey_id_counter += 1
     await message.answer(f"📝 Ваша анкета ID {user_answers[chat_id]['id']}.\n\n{questions[0]}")
 
-# ❓ Обработка нажатия кнопки "Частые вопросы"
+# ❓ Обработка кнопки "Частые вопросы" (теперь анкета сбрасывается)
 @dp.message(lambda message: message.text == "Частые вопросы")
 async def show_faq(message: types.Message):
+    chat_id = message.chat.id
+
+    # Если пользователь начал анкету, сбрасываем её
+    if chat_id in user_answers:
+        del user_answers[chat_id]
+
     response = "📌 Часто задаваемые вопросы:\n\n"
     for keyword in faq:
         response += f"👉 {keyword.capitalize()}\n"
     response += "\nНапишите ваш вопрос, и я попробую ответить!"
+
     await message.answer(response)
 
-# 📎 Прикрепление фото и документов
+# 📎 Прикрепление фото и документов + отправка админу
 @dp.message(lambda message: message.photo or message.document)
 async def handle_file(message: types.Message):
     chat_id = message.chat.id
@@ -164,9 +171,18 @@ async def handle_file(message: types.Message):
     if chat_id in user_answers and len(user_answers[chat_id]["answers"]) == 6:
         file_id = message.photo[-1].file_id if message.photo else message.document.file_id
         user_answers[chat_id]["answers"].append(file_id)
+
+        # Отправляем подтверждение пользователю
         await message.answer(f"✅ Файл получен.\n\n{questions[len(user_answers[chat_id]['answers'])]}")
+
+        # Отправляем файл админу
+        if message.photo:
+            await bot.send_photo(ADMIN_ID, file_id, caption=f"📎 Фото от клиента (Анкета ID {user_answers[chat_id]['id']})")
+        elif message.document:
+            await bot.send_document(ADMIN_ID, file_id, caption=f"📎 Файл от клиента (Анкета ID {user_answers[chat_id]['id']})")
     else:
         await message.answer("📎 Отправьте файл в процессе заполнения анкеты после соответствующего вопроса.")
+
 
 # 🔄 Обработка ответов анкеты и FAQ
 @dp.message()
