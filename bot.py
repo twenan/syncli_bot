@@ -174,24 +174,51 @@ async def collect_answers_or_faq(message: types.Message):
         await message.answer("Чтобы заполнить анкету, нажмите 'Заполнить анкету' в меню.")
 
 
-# Частые вопросы
+# **Частые вопросы**
 @dp.message(lambda message: message.text == "Частые вопросы")
 async def show_faq(message: types.Message):
-    response = "📌 Часто задаваемые вопросы:\n\n"
-    for keyword in faq:
-        response += f"👉 {keyword.capitalize()}\n"
-    response += "\nНапишите ваш вопрос, и я попробую ответить!"
+    chat_id = message.chat.id
+
+    # Если пользователь заполняет анкету, но нажал "Частые вопросы", временно приостанавливаем заполнение анкеты
+    if chat_id in user_answers and user_answers[chat_id]["answers"]:
+        await message.answer("❗️ Вы заполняете анкету. Если хотите продолжить, просто введите следующий ответ.\n\n"
+                             "Если у вас возникли вопросы, вот список часто задаваемых:")
+    else:
+        await message.answer("📌 Часто задаваемые вопросы:\n")
+
+    response = ""
+    for keyword, answer in faq.items():
+        response += f"👉 {keyword.capitalize()} - {answer}\n\n"
+
+    response += "Напишите ваш вопрос, и я попробую ответить!"
+    
     await message.answer(response)
 
-# Прикрепление файлов
+# **Прикрепление файлов и отправка админу**
 @dp.message(lambda message: message.photo or message.document)
 async def handle_file(message: types.Message):
     chat_id = message.chat.id
 
     if chat_id in user_answers and len(user_answers[chat_id]["answers"]) == 6:
-        file_id = message.photo[-1].file_id if message.photo else message.document.file_id
+        # Определяем тип файла (фото или документ)
+        if message.photo:
+            file_id = message.photo[-1].file_id
+            file_type = "фото"
+        else:
+            file_id = message.document.file_id
+            file_type = "документ"
+
+        # Сохраняем file_id в анкете
         user_answers[chat_id]["answers"].append(file_id)
-        await message.answer(f"✅ Файл получен.\n\n{questions[len(user_answers[chat_id]['answers'])]}")
+
+        await message.answer(f"✅ {file_type.capitalize()} получено.\n\n{questions[len(user_answers[chat_id]['answers'])]}")
+
+        # Отправка файла админу
+        if file_type == "фото":
+            await bot.send_photo(ADMIN_ID, file_id, caption=f"📷 Фото от клиента (анкета ID {user_answers[chat_id]['id']})")
+        else:
+            await bot.send_document(ADMIN_ID, file_id, caption=f"📎 Файл от клиента (анкета ID {user_answers[chat_id]['id']})")
+
     else:
         await message.answer("📎 Отправьте файл в процессе заполнения анкеты после соответствующего вопроса.")
 
