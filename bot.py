@@ -47,7 +47,7 @@ def save_users(users):
     with open("users.json", "w") as f:
         json.dump(users, f, ensure_ascii=False, indent=4)
 
-users = load_users()  # Словарь для хранения данных пользователей {chat_id: {name, telegram, phone}}
+users = load_users()
 
 # Вопросы анкеты
 questions = [
@@ -139,9 +139,7 @@ async def process_consent(call: types.CallbackQuery):
         survey_id_counter += 1
         save_survey_id(survey_id_counter)
 
-        # Проверяем, есть ли пользователь в базе
         if str(chat_id) in users:
-            # Если пользователь уже заполнял анкету, пропускаем контактные данные
             user_answers[chat_id]["answers"] = [
                 users[str(chat_id)]["name"],
                 users[str(chat_id)]["telegram"],
@@ -149,7 +147,6 @@ async def process_consent(call: types.CallbackQuery):
             ]
             await call.message.edit_text(f"Спасибо за согласие! 📝 Вы уже заполняли контактные данные, начнем с товара.\n\n{questions[3]}")
         else:
-            # Новый пользователь, начинаем с первого вопроса
             await call.message.edit_text(f"Спасибо за согласие! 📝 Начнем.\n\n{questions[0]}")
     
     elif call.data == "view_offer":
@@ -192,7 +189,6 @@ async def show_faq(message: types.Message):
 
 # Завершение анкеты
 async def finish_survey(chat_id, message):
-    source_chat = user_answers[chat_id]["source_chat"]
     # Сохраняем контактные данные нового пользователя
     if str(chat_id) not in users and len(user_answers[chat_id]["answers"]) >= 3:
         users[str(chat_id)] = {
@@ -202,21 +198,36 @@ async def finish_survey(chat_id, message):
         }
         save_users(users)
 
-    answers_text = f"Источник: Чат ID {source_chat}\n" + "\n".join(
-        f"{questions[i]}: {answer}" if not isinstance(answer, dict) else "📎 Прикрепленный файл"
-        for i, answer in enumerate(user_answers[chat_id]["answers"])
+    # Формируем текст анкеты без упоминания файлов
+    answers_text = "\n".join(
+        f"{questions[i]}: {answer}" for i, answer in enumerate(user_answers[chat_id]["answers"])
+        if not isinstance(answer, dict)
     )
+
     try:
         logger.debug(f"Отправка анкеты в чат {MANAGER_CHAT_ID}")
-        await bot.send_message(MANAGER_CHAT_ID, f"📩 Новая анкета ID {user_answers[chat_id]['id']}:\n\n{answers_text}")
-        if any(isinstance(answer, dict) for answer in user_answers[chat_id]["answers"]):
-            await bot.send_message(MANAGER_CHAT_ID, f"📎 Файлы к анкете ID {user_answers[chat_id]['id']}:")
-            for answer in user_answers[chat_id]["answers"]:
-                if isinstance(answer, dict):
-                    if answer["type"] == "photo":
-                        await bot.send_photo(MANAGER_CHAT_ID, answer["file_id"], caption=f"Фото к анкете ID {user_answers[chat_id]['id']}")
-                    elif answer["type"] == "document":
-                        await bot.send_document(MANAGER_CHAT_ID, answer["file_id"], caption=f"Документ к анкете ID {user_answers[chat_id]['id']}")
+        # Если есть файл, отправляем его вместе с текстом
+        files = [answer for answer in user_answers[chat_id]["answers"] if isinstance(answer, dict)]
+        if files:
+            file = files[0]  # Берем первый файл (если нужно несколько, потребуется доработка)
+            if file["type"] == "photo":
+                await bot.send_photo(
+                    MANAGER_CHAT_ID,
+                    file["file_id"],
+                    caption=f"📩 Новая анкета ID {user_answers[chat_id]['id']}:\n\n{answers_text}"
+                )
+            elif file["type"] == "document":
+                await bot.send_document(
+                    MANAGER_CHAT_ID,
+                    file["file_id"],
+                    caption=f"📩 Новая анкета ID {user_answers[chat_id]['id']}:\n\n{answers_text}"
+                )
+        else:
+            # Если файла нет, просто текст
+            await bot.send_message(
+                MANAGER_CHAT_ID,
+                f"📩 Новая анкета ID {user_answers[chat_id]['id']}:\n\n{answers_text}"
+            )
         await message.answer("Ваша анкета успешно отправлена! Мы свяжемся с вами в ближайшее время.")
     except Exception as e:
         logger.error(f"Ошибка при отправке в чат менеджеров {MANAGER_CHAT_ID}: {e}")
