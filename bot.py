@@ -19,7 +19,20 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 ADMIN_ID = 219614301  # Telegram ID менеджера
-survey_id_counter = 1  # ID анкеты, начинается с 1
+
+# Функция для работы с ID анкет
+def load_survey_id():
+    try:
+        with open("survey_id.txt", "r") as f:
+            return int(f.read())
+    except:
+        return 1
+
+def save_survey_id(counter):
+    with open("survey_id.txt", "w") as f:
+        f.write(str(counter))
+
+survey_id_counter = load_survey_id()
 
 # Вопросы анкеты
 questions = [
@@ -59,7 +72,7 @@ start_keyboard = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
-# 🔹 **ИНКЛАЙН-КЛАВИАТУРА ДЛЯ ОФЕРТЫ**
+# Инлайн-клавиатура для согласия
 consent_keyboard = InlineKeyboardMarkup(
     inline_keyboard=[
         [InlineKeyboardButton(text="✅ Да", callback_data="consent_yes")],
@@ -68,7 +81,7 @@ consent_keyboard = InlineKeyboardMarkup(
     ]
 )
 
-# 🔹 **ИНКЛАЙН-КЛАВИАТУРА ДЛЯ ВТОРОГО ШАНСА**
+# Инлайн-клавиатура для второго шанса
 consent_second_keyboard = InlineKeyboardMarkup(
     inline_keyboard=[
         [InlineKeyboardButton(text="✅ Да", callback_data="consent_yes")],
@@ -86,13 +99,13 @@ delivery_keyboard = InlineKeyboardMarkup(
     ]
 )
 
-# 🏁 Функция обработки команды /start
+# Обработка команды /start
 @dp.message(Command("start"))
 async def start(message: types.Message):
     logger.debug("Команда /start получена")
     await message.answer("Привет! Я помогу вам с заказом. Выберите действие:", reply_markup=start_keyboard)
 
-  # 🔹 **ЗАПРОС НА СОГЛАСИЕ ПЕРЕД АНКЕТОЙ**
+# Запрос согласия перед анкетой
 @dp.message(lambda message: message.text == "Заполнить анкету")
 async def request_consent(message: types.Message):
     await message.answer(
@@ -100,223 +113,137 @@ async def request_consent(message: types.Message):
         reply_markup=consent_keyboard
     )
 
-# 🔹 **ОБРАБОТКА ВЫБОРА ПОЛЬЗОВАТЕЛЯ (ДА / НЕТ / ПОСМОТРЕТЬ ОФЕРТУ)**
+# Обработка согласия
 @dp.callback_query(lambda call: call.data in ["consent_yes", "consent_no", "view_offer", "final_no"])
 async def process_consent(call: types.CallbackQuery):
     chat_id = call.message.chat.id
 
     if call.data == "consent_yes":
-        # Начинаем анкету
         global survey_id_counter
-        user_answers[chat_id] = {
-            "id": survey_id_counter,
-            "answers": []
-        }
+        user_answers[chat_id] = {"id": survey_id_counter, "answers": []}
         survey_id_counter += 1
+        save_survey_id(survey_id_counter)
         await call.message.edit_text(f"Спасибо за согласие! 📝 Ваша анкета ID {user_answers[chat_id]['id']}.\n\n{questions[0]}")
     
     elif call.data == "view_offer":
-        # Отправляем оферту и снова предлагаем выбор
-        await bot.send_document(chat_id, document=types.FSInputFile("/home/anna/syncli_bot/offer.pdf"), caption="📄 Оферта на обработку персональных данных")
-        await call.message.edit_text("Ознакомьтесь с документом и выберите вариант.", reply_markup=consent_keyboard)
+        try:
+            await bot.send_document(chat_id, document=types.FSInputFile("/home/anna/syncli_bot/offer.pdf"), caption="📄 Оферта")
+            await call.message.edit_text("Ознакомьтесь с документом и выберите вариант.", reply_markup=consent_keyboard)
+        except Exception as e:
+            logger.error(f"Ошибка при отправке оферты: {e}")
+            await call.message.edit_text("Ошибка при загрузке оферты. Попробуйте позже.", reply_markup=consent_keyboard)
 
     elif call.data == "consent_no":
-        # Предлагаем еще раз подумать
         await call.message.edit_text(
-            "Мы не передаем ваши персональные данные третьим лицам. "
-            "Они нужны только для обработки вашего заказа. Вы хотите продолжить?",
-            reply_markup=consent_second_keyboard  # Показываем вторую инлайн-клавиатуру
+            "Мы не передаем ваши данные третьим лицам. Они нужны только для заказа. Продолжить?",
+            reply_markup=consent_second_keyboard
         )
 
     elif call.data == "final_no":
-        # Если пользователь снова отказался
-        await call.message.edit_text(
-            "Тогда свяжитесь напрямую с менеджером: @YourManagerTelegram",
-            reply_markup=None  # Убираем только инлайн-клавиатуру, но меню остается
-        )
-        
-# 📝 Запуск анкеты
-@dp.message(lambda message: message.text == "Заполнить анкету")
-async def start_survey(message: types.Message):
-    global survey_id_counter
-    chat_id = message.chat.id
-    user_answers[chat_id] = {
-        "id": survey_id_counter,
-        "answers": []
-    }
-    survey_id_counter += 1
-    await message.answer(f"📝 Ваша анкета ID {user_answers[chat_id]['id']}.\n\n{questions[0]}")
+        await call.message.edit_text("Свяжитесь с менеджером напрямую: @YourManagerTelegram", reply_markup=None)
 
-# ❓ Обработка кнопки "Частые вопросы" (теперь анкета сбрасывается)
-@dp.message(lambda message: message.text == "Частые вопросы")
-async def show_faq(message: types.Message):
-    chat_id = message.chat.id
-
-    # Если пользователь начал анкету, сбрасываем её
-    if chat_id in user_answers:
-        del user_answers[chat_id]
-
-    response = "📌 Часто задаваемые вопросы:\n\n"
-    for keyword in faq:
-        response += f"👉 {keyword.capitalize()}\n"
-    response += "\nНапишите ваш вопрос, и я попробую ответить!"
-
-    await message.answer(response)
-
-# 📎 Прикрепление фото и документов (сохранение для отправки админу в конце)
+# Обработка файлов
 @dp.message(lambda message: message.photo or message.document)
 async def handle_file(message: types.Message):
     chat_id = message.chat.id
-
     if chat_id in user_answers and len(user_answers[chat_id]["answers"]) == 6:
-        if message.photo:
-            file_id = message.photo[-1].file_id  # Берем фото в наилучшем качестве
-        elif message.document:
-            file_id = message.document.file_id  # Берем ID документа
-        else:
-            return
-
-        # Сохраняем file_id в анкету пользователя
-        user_answers[chat_id]["answers"].append({"file_id": file_id, "type": "photo" if message.photo else "document"})
-
+        file_id = message.photo[-1].file_id if message.photo else message.document.file_id
+        file_type = "photo" if message.photo else "document"
+        user_answers[chat_id]["answers"].append({"file_id": file_id, "type": file_type})
         await message.answer(f"✅ Файл получен.\n\n{questions[len(user_answers[chat_id]['answers'])]}")
     else:
-        await message.answer("📎 Отправьте файл в процессе заполнения анкеты после соответствующего вопроса.")
+        await message.answer("📎 Отправьте файл только на этапе соответствующего вопроса в анкете.")
 
-# 🔄 Обработка ответов анкеты и FAQ
+# Обработка FAQ
+@dp.message(lambda message: message.text == "Частые вопросы")
+async def show_faq(message: types.Message):
+    chat_id = message.chat.id
+    if chat_id in user_answers:
+        del user_answers[chat_id]  # Сброс анкеты
+    response = "📌 Часто задаваемые вопросы:\n\n" + "\n".join(f"👉 {k.capitalize()}" for k in faq) + "\n\nНапишите ваш вопрос!"
+    await message.answer(response)
+
+# Завершение анкеты
+async def finish_survey(chat_id, message):
+    answers_text = "\n".join(
+        f"{questions[i]}: {answer}" if not isinstance(answer, dict) else "📎 Прикрепленный файл"
+        for i, answer in enumerate(user_answers[chat_id]["answers"])
+    )
+    try:
+        await bot.send_message(ADMIN_ID, f"📩 Новая анкета ID {user_answers[chat_id]['id']}:\n\n{answers_text}")
+        if any(isinstance(answer, dict) for answer in user_answers[chat_id]["answers"]):
+            await bot.send_message(ADMIN_ID, f"📎 Файлы к анкете ID {user_answers[chat_id]['id']}:")
+            for answer in user_answers[chat_id]["answers"]:
+                if isinstance(answer, dict):
+                    if answer["type"] == "photo":
+                        await bot.send_photo(ADMIN_ID, answer["file_id"], caption=f"Фото к анкете ID {user_answers[chat_id]['id']}")
+                    elif answer["type"] == "document":
+                        await bot.send_document(ADMIN_ID, answer["file_id"], caption=f"Документ к анкете ID {user_answers[chat_id]['id']}")
+        await message.answer("Ваша анкета успешно отправлена! Мы свяжемся с вами в ближайшее время.")
+    except Exception as e:
+        logger.error(f"Ошибка при отправке админу: {e}")
+        await message.answer("Ошибка при отправке анкеты. Свяжитесь с менеджером: @YourManagerTelegram")
+    del user_answers[chat_id]
+
+# Обработка ответов анкеты и FAQ
 @dp.message()
 async def collect_answers_or_faq(message: types.Message):
     chat_id = message.chat.id
+    text = message.text.lower() if message.text else ""
 
-        # Проверяем, если сообщение - это частый вопрос
-    for keyword, response in faq.items():
-        if keyword.lower() in message.text.lower():
-            await message.answer(response)
-            return  # Выход из функции, чтобы не засчитало как ответ на анкету
-
-    # Если пользователь хочет вернуться назад в анкете
-    if message.text.lower() == "назад" and chat_id in user_answers and user_answers[chat_id]["answers"]:
-        user_answers[chat_id]["answers"].pop()
-        await message.answer(f"🔄 Введите новый ответ:\n\n{questions[len(user_answers[chat_id]['answers'])]}")
+    if not message.text and not (message.photo or message.document):
+        await message.answer("Пожалуйста, отправьте текст или файл, если это требуется анкетой.")
         return
 
-    if not message.text:
-        return
-
-    text = message.text.lower()
-
-    # Обработка сообщений в группах (ищем совпадения в FAQ)
+    # Обработка FAQ в группах и личных чатах
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
-        logger.debug(f"Сообщение в группе ({message.chat.title}): {message.text}")
         for keyword, response in faq.items():
             if any(word in text for word in keyword.lower().split()):
                 await message.reply(response)
                 return
         return
 
-    # Продолжение заполнения анкеты
-    if chat_id in user_answers:
-        user_answers[chat_id]["answers"].append(message.text)
-
-        if len(user_answers[chat_id]["answers"]) < len(questions):
-            if len(user_answers[chat_id]["answers"]) == 12:  # Вопрос о сроке доставки
-                await message.answer("⏳ Выберите срок доставки:", reply_markup=delivery_keyboard)
-            else:
-                await message.answer(questions[len(user_answers[chat_id]["answers"])])
-        else:
-            answers_text = "\n".join([
-                f"{questions[i]}: {answer}" if i != 6 else "Прикрепленный файл"
-                for i, answer in enumerate(user_answers[chat_id]["answers"])
-            ])
-
-            # Отправляем заполненную анкету админу
-            await bot.send_message(
-                ADMIN_ID, 
-                f"📩 Новая анкета ID {user_answers[chat_id]['id']}:\n\n{answers_text}"
-            )
-
-         # 🔄 Обработка ответов анкеты и FAQ (файл отправляется админу в конце)
-@dp.message()
-async def collect_answers_or_faq(message: types.Message):
-    chat_id = message.chat.id
-
-    # Проверяем, если сообщение - это частый вопрос
+    # Проверка FAQ в личных чатах
     for keyword, response in faq.items():
-        if keyword.lower() in message.text.lower():
+        if any(word in text for word in keyword.lower().split()):
             await message.answer(response)
-            return  # Выход из функции, чтобы не засчитало как ответ на анкету
+            return
 
-    # Если пользователь хочет вернуться назад в анкете
-    if message.text.lower() == "назад" and chat_id in user_answers and user_answers[chat_id]["answers"]:
-        user_answers[chat_id]["answers"].pop()
-        await message.answer(f"🔄 Введите новый ответ:\n\n{questions[len(user_answers[chat_id]['answers'])]}")
-        return
-
-    if not message.text:
-        return
-
-    # Продолжение заполнения анкеты
+    # Обработка анкеты
     if chat_id in user_answers:
-        user_answers[chat_id]["answers"].append(message.text)
+        if text == "назад" and user_answers[chat_id]["answers"]:
+            user_answers[chat_id]["answers"].pop()
+            await message.answer(f"🔄 Введите новый ответ:\n\n{questions[len(user_answers[chat_id]['answers'])]}")
+            return
 
-        if len(user_answers[chat_id]["answers"]) < len(questions):
-            if len(user_answers[chat_id]["answers"]) == 12:  # Вопрос о сроке доставки
+        user_answers[chat_id]["answers"].append(message.text)
+        next_index = len(user_answers[chat_id]["answers"])
+
+        if next_index < len(questions):
+            if next_index == 12:  # Вопрос о сроке доставки
                 await message.answer("⏳ Выберите срок доставки:", reply_markup=delivery_keyboard)
             else:
-                await message.answer(questions[len(user_answers[chat_id]["answers"])])
+                await message.answer(questions[next_index])
         else:
-            answers_text = "\n".join([
-                f"{questions[i]}: {answer}" if not isinstance(answer, dict) else "📎 Прикрепленный файл"
-                for i, answer in enumerate(user_answers[chat_id]["answers"])
-            ])
-
-            # Отправляем заполненную анкету админу
-            await bot.send_message(
-                ADMIN_ID, 
-                f"📩 Новая анкета ID {user_answers[chat_id]['id']}:\n\n{answers_text}"
-            )
-
-            # Проверяем, есть ли прикрепленный файл, и отправляем админу
-            for answer in user_answers[chat_id]["answers"]:
-                if isinstance(answer, dict) and "file_id" in answer:
-                    if answer["type"] == "photo":
-                        await bot.send_photo(
-                            ADMIN_ID, 
-                            answer["file_id"], 
-                            caption=f"📎 Файл к анкете ID {user_answers[chat_id]['id']}"
-                        )
-                    elif answer["type"] == "document":
-                        await bot.send_document(
-                            ADMIN_ID, 
-                            answer["file_id"], 
-                            caption=f"📎 Файл к анкете ID {user_answers[chat_id]['id']}"
-                        )
-
-            await message.answer("Спасибо! Мы свяжемся с вами в ближайшее время.")
-            del user_answers[chat_id]  # Удаляем данные пользователя после отправки анкеты
-
-
-            await message.answer("Спасибо! Мы свяжемся с вами в ближайшее время.")
-            del user_answers[chat_id]
+            await finish_survey(chat_id, message)
     else:
-        for keyword, response in faq.items():
-            if any(word in text for word in keyword.lower().split()):
-                await message.answer(response)
-                return
-
         if message.chat.type == ChatType.PRIVATE:
             await message.answer("Я пока не знаю ответа на этот вопрос, но передам его менеджеру!")
 
-# ⏳ Выбор срока доставки
-@dp.callback_query()
+# Выбор срока доставки
+@dp.callback_query(lambda call: call.data in ["10-13", "15-18", "25-30", "avia"])
 async def delivery_selected(call: types.CallbackQuery):
     chat_id = call.message.chat.id
     if chat_id in user_answers:
         user_answers[chat_id]["answers"].append(call.data)
-        await call.message.answer("✅ Срок доставки выбран. " + questions[len(user_answers[chat_id]['answers'])])
+        next_index = len(user_answers[chat_id]["answers"])
+        if next_index < len(questions):
+            await call.message.answer(f"✅ Срок доставки выбран.\n\n{questions[next_index]}")
+        else:
+            await finish_survey(chat_id, call.message)
     await call.answer()
 
-# 🚀 Запуск бота
+# Запуск бота
 async def main():
     await dp.start_polling(bot)
 
