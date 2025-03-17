@@ -194,7 +194,7 @@ async def handle_file(message: types.Message):
 
             file_data = None
             if message.photo:
-                photo = message.photo[-1]  # Берем самое большое разрешение
+                photo = message.photo[-1]
                 file_data = {"file_id": photo.file_id, "type": "photo"}
             elif message.document:
                 file_data = {"file_id": message.document.file_id, "type": "document"}
@@ -203,7 +203,6 @@ async def handle_file(message: types.Message):
                 media_groups[message.media_group_id]["files"].append(file_data)
                 logger.debug(f"Добавлен файл в медиагруппу {message.media_group_id}: {file_data['file_id']}")
 
-            # Отправляем сообщение только один раз после первой обработки медиагруппы
             if not media_groups[message.media_group_id]["processed"]:
                 media_groups[message.media_group_id]["processed"] = True
                 await message.answer("✅ Файл(ы) получены. Прикрепите еще или напишите 'Готово' для продолжения.")
@@ -229,22 +228,29 @@ async def handle_file(message: types.Message):
 @dp.message(lambda message: message.text and message.text.lower() == "готово")
 async def handle_ready(message: types.Message):
     chat_id = message.chat.id
+    logger.debug(f"Получено 'Готово'. Chat ID: {chat_id}, user_answers: {user_answers.get(chat_id)}")
 
-    if chat_id in user_answers and len(user_answers[chat_id]["answers"]) == 6:
-        files_list = user_answers[chat_id]["answers"][6]
+    if chat_id in user_answers:
+        # Если на этапе загрузки файлов (6-й вопрос + список файлов)
+        if len(user_answers[chat_id]["answers"]) >= 6 and isinstance(user_answers[chat_id]["answers"][6], list):
+            files_list = user_answers[chat_id]["answers"][6]
 
-        # Переносим файлы из медиагрупп в основной список
-        for media_group_id, group_data in list(media_groups.items()):
-            if group_data["chat_id"] == chat_id:
-                files_list.extend([f for f in group_data["files"] if f["file_id"] not in [x["file_id"] for x in files_list]])
-                del media_groups[media_group_id]
-                logger.debug(f"Перенесены файлы из медиагруппы {media_group_id} в список Chat ID {chat_id}: {files_list}")
+            # Переносим файлы из медиагрупп в основной список
+            for media_group_id, group_data in list(media_groups.items()):
+                if group_data["chat_id"] == chat_id:
+                    files_list.extend([f for f in group_data["files"] if f["file_id"] not in [x["file_id"] for x in files_list]])
+                    del media_groups[media_group_id]
+                    logger.debug(f"Перенесены файлы из медиагруппы {media_group_id} в список Chat ID {chat_id}: {files_list}")
 
-        user_answers[chat_id]["answers"].append("Готово")  # Добавляем индикатор завершения
-        await message.answer("✅ Все файлы получены. Продолжаем заполнение анкеты.")
-        await message.answer(questions[7])  # Переходим к следующему вопросу
-        logger.debug(f"Текущий список файлов после 'Готово' для Chat ID {chat_id}: {files_list}")
-        return
+            # Переходим к следующему вопросу
+            if len(user_answers[chat_id]["answers"]) == 7:  # Если "Готово" уже добавлено
+                await message.answer(questions[7])
+            else:
+                user_answers[chat_id]["answers"].append("Готово")
+                await message.answer("✅ Все файлы получены. Продолжаем заполнение анкеты.")
+                await message.answer(questions[7])
+            logger.debug(f"После 'Готово' user_answers для Chat ID {chat_id}: {user_answers[chat_id]}")
+            return
 
 # Обработка FAQ
 @dp.message(lambda message: message.text == "Частые вопросы")
@@ -332,10 +338,9 @@ async def collect_answers_or_faq(message: types.Message):
             await message.answer(f"🔄 Введите новый ответ:\n\n{questions[len(user_answers[chat_id]['answers'])]}")
             return
 
-        if len(user_answers[chat_id]["answers"]) == 6:
-            if text == "готово":
-                await handle_ready(message)
-                return
+        if text == "готово":
+            await handle_ready(message)
+            return
 
         user_answers[chat_id]["answers"].append(message.text)
         next_index = len(user_answers[chat_id]["answers"])
