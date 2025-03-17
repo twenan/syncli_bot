@@ -123,7 +123,7 @@ async def process_consent(call: types.CallbackQuery):
         user_answers[chat_id] = {"id": survey_id_counter, "answers": []}
         survey_id_counter += 1
         save_survey_id(survey_id_counter)
-        await call.message.edit_text(f"Спасибо за согласие! 📝 Ваша анкета ID {user_answers[chat_id]['id']}.\n\n{questions[0]}")
+        await call.message.edit_text(f"Спасибо за согласие! 📝 Начнем.\n\n{questions[0]}")  # Без ID для клиента
     
     elif call.data == "view_offer":
         try:
