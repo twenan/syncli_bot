@@ -185,7 +185,7 @@ async def handle_file(message: types.Message):
             user_answers[chat_id]["answers"][6].append({"file_id": message.document.file_id, "type": "document"})
         
         await message.answer("✅ Файл(ы) получены. Прикрепите еще или напишите 'Готово' для продолжения.")
-    elif chat_id not in user_answers or len(user_answers[chat_id]["answers"]) != 6:
+    else:
         await message.answer("📎 Отправьте файл только на этапе соответствующего вопроса в анкете.")
 
 # Обработка FAQ
@@ -247,15 +247,11 @@ async def finish_survey(chat_id, message):
         await message.answer("Ошибка при отправке анкеты. Свяжитесь с менеджером: @YourManagerTelegram")
     del user_answers[chat_id]
 
-# Обработка ответов анкеты и FAQ
-@dp.message()
+# Обработка текстовых ответов анкеты и FAQ
+@dp.message(lambda message: message.text)  # Обрабатываем только текстовые сообщения
 async def collect_answers_or_faq(message: types.Message):
     chat_id = message.chat.id
-    text = message.text.lower() if message.text else ""
-
-    if not message.text and not (message.photo or message.document):
-        await message.answer("Пожалуйста, отправьте текст или файл, если это требуется анкетой.")
-        return
+    text = message.text.lower()
 
     # Обработка FAQ в группах и личных чатах
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
@@ -279,9 +275,11 @@ async def collect_answers_or_faq(message: types.Message):
             return
 
         # Проверяем, на этапе файлов ли мы
-        if len(user_answers[chat_id]["answers"]) == 6 and text != "готово":
-            await message.answer("Прикрепите еще файл(ы) или напишите 'Готово' для продолжения.")
-            return
+        if len(user_answers[chat_id]["answers"]) == 6:
+            if text == "готово":
+                user_answers[chat_id]["answers"].append(text)  # Добавляем "Готово" как индикатор
+                await message.answer(questions[7])  # Переходим к следующему вопросу
+            return  # Ничего не делаем, ждем "Готово"
 
         user_answers[chat_id]["answers"].append(message.text)
         next_index = len(user_answers[chat_id]["answers"])
