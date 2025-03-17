@@ -290,7 +290,7 @@ async def delivery_selected(call: types.CallbackQuery):
             await finish_survey(chat_id, call.message)
     await call.answer()
 
-# Запуск бота
+# Запуск бота1
 async def main():
     await dp.start_polling(bot)
 
