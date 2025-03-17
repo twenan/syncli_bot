@@ -176,43 +176,32 @@ async def handle_file(message: types.Message):
             user_answers[chat_id]["answers"].append([])
             logger.debug(f"Создан новый список файлов для Chat ID: {chat_id}")
 
-        # Обрабатываем медиагруппу или одиночные файлы
         files_list = user_answers[chat_id]["answers"][6]
-        if message.media_group_id:
-            # Проверяем, не добавлен ли уже файл из этой медиагруппы
-            if not any(file.get("media_group_id") == message.media_group_id for file in files_list):
-                if message.photo:
-                    photo = message.photo[-1]  # Берем самое большое разрешение
-                    files_list.append({
-                        "file_id": photo.file_id,
-                        "type": "photo",
-                        "media_group_id": message.media_group_id
-                    })
-                    logger.debug(f"Добавлено фото из медиагруппы: {photo.file_id}, Media Group ID: {message.media_group_id}")
-                elif message.document:
-                    files_list.append({
-                        "file_id": message.document.file_id,
-                        "type": "document",
-                        "media_group_id": message.media_group_id
-                    })
-                    logger.debug(f"Добавлен документ из медиагруппы: {message.document.file_id}, Media Group ID: {message.media_group_id}")
-        else:
-            # Одиночные файлы
-            if message.photo:
-                photo = message.photo[-1]
+        file_added = False
+
+        # Обрабатываем фото или документ
+        if message.photo:
+            photo = message.photo[-1]  # Берем самое большое разрешение
+            if not any(file["file_id"] == photo.file_id for file in files_list):  # Проверяем, нет ли дубля
                 files_list.append({
                     "file_id": photo.file_id,
-                    "type": "photo"
+                    "type": "photo",
+                    "media_group_id": message.media_group_id if message.media_group_id else None
                 })
-                logger.debug(f"Добавлено одиночное фото: {photo.file_id}")
-            elif message.document:
+                logger.debug(f"Добавлено фото: {photo.file_id}, Media Group ID: {message.media_group_id}")
+                file_added = True
+        elif message.document:
+            if not any(file["file_id"] == message.document.file_id for file in files_list):  # Проверяем, нет ли дубля
                 files_list.append({
                     "file_id": message.document.file_id,
-                    "type": "document"
+                    "type": "document",
+                    "media_group_id": message.media_group_id if message.media_group_id else None
                 })
-                logger.debug(f"Добавлен одиночный документ: {message.document.file_id}")
+                logger.debug(f"Добавлен документ: {message.document.file_id}, Media Group ID: {message.media_group_id}")
+                file_added = True
 
-        await message.answer("✅ Файл(ы) получены. Прикрепите еще или напишите 'Готово' для продолжения.")
+        if file_added:
+            await message.answer("✅ Файл(ы) получены. Прикрепите еще или напишите 'Готово' для продолжения.")
         logger.debug(f"Текущий список файлов для Chat ID {chat_id}: {files_list}")
         return
     await message.answer("📎 Отправьте файл только на этапе соответствующего вопроса в анкете.")
@@ -247,10 +236,10 @@ async def finish_survey(chat_id, message):
         
         if files:
             media_group = []
-            unique_file_ids = set()  # Для предотвращения дублей
+            unique_file_ids = set()
             for file in files:
                 file_id = file["file_id"]
-                if file_id not in unique_file_ids:  # Добавляем только уникальные файлы
+                if file_id not in unique_file_ids:
                     if file["type"] == "photo":
                         media_group.append(InputMediaPhoto(media=file_id))
                     elif file["type"] == "document":
