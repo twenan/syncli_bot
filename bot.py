@@ -170,23 +170,25 @@ async def process_consent(call: types.CallbackQuery):
 @dp.message(lambda message: message.photo or message.document)
 async def handle_file(message: types.Message):
     chat_id = message.chat.id
-    if chat_id in user_answers and len(user_answers[chat_id]["answers"]) == 6:
-        # Инициализируем список файлов, если его еще нет
-        if not any(isinstance(answer, list) for answer in user_answers[chat_id]["answers"]):
-            user_answers[chat_id]["answers"].append([])
+    if chat_id in user_answers:
+        if len(user_answers[chat_id]["answers"]) == 6:
+            # Инициализируем список файлов, если его еще нет
+            if not any(isinstance(answer, list) for answer in user_answers[chat_id]["answers"]):
+                user_answers[chat_id]["answers"].append([])
 
-        # Обрабатываем все фото из сообщения
-        if message.photo:
-            for photo in message.photo:
-                user_answers[chat_id]["answers"][6].append({"file_id": photo.file_id, "type": "photo"})
+            # Обрабатываем все фото из сообщения
+            if message.photo:
+                for photo in message.photo:
+                    user_answers[chat_id]["answers"][6].append({"file_id": photo.file_id, "type": "photo"})
+            
+            # Обрабатываем документ, если он есть
+            if message.document:
+                user_answers[chat_id]["answers"][6].append({"file_id": message.document.file_id, "type": "document"})
+            
+            await message.answer("✅ Файл(ы) получены. Прикрепите еще или напишите 'Готово' для продолжения.")
+            return  # Завершаем обработку, чтобы не попадать в другие обработчики
         
-        # Обрабатываем документ, если он есть
-        if message.document:
-            user_answers[chat_id]["answers"][6].append({"file_id": message.document.file_id, "type": "document"})
-        
-        await message.answer("✅ Файл(ы) получены. Прикрепите еще или напишите 'Готово' для продолжения.")
-    else:
-        await message.answer("📎 Отправьте файл только на этапе соответствующего вопроса в анкете.")
+    await message.answer("📎 Отправьте файл только на этапе соответствующего вопроса в анкете.")
 
 # Обработка FAQ
 @dp.message(lambda message: message.text == "Частые вопросы")
@@ -279,7 +281,7 @@ async def collect_answers_or_faq(message: types.Message):
             if text == "готово":
                 user_answers[chat_id]["answers"].append(text)  # Добавляем "Готово" как индикатор
                 await message.answer(questions[7])  # Переходим к следующему вопросу
-            return  # Ничего не делаем, ждем "Готово"
+            return  # Ждем "Готово", ничего больше не отправляем
 
         user_answers[chat_id]["answers"].append(message.text)
         next_index = len(user_answers[chat_id]["answers"])
