@@ -57,7 +57,7 @@ questions = [
     "Напишите наименование товара",
     "Вставьте ссылку на товар на маркетплейсах (если есть)",
     "Какое количество вам нужно?",
-    "Прикрепите фото товара (или PDF, Excel-файл)",
+    "Прикрепите фото товара (или PDF, Excel-файл). Если файлов несколько, отправьте их по одному, затем напишите 'Готово'",
     "Напишите размеры товара и количество каждого размера",
     "Укажите цвет товара",
     "Укажите, нужны ли дополнительные элементы (например, аксессуары, инструменты, важные детали).",
@@ -173,8 +173,11 @@ async def handle_file(message: types.Message):
     if chat_id in user_answers and len(user_answers[chat_id]["answers"]) == 6:
         file_id = message.photo[-1].file_id if message.photo else message.document.file_id
         file_type = "photo" if message.photo else "document"
-        user_answers[chat_id]["answers"].append({"file_id": file_id, "type": file_type})
-        await message.answer(f"✅ Файл получен.\n\n{questions[len(user_answers[chat_id]['answers'])]}")
+        # Добавляем файл в список файлов, если его еще нет
+        if not any(isinstance(answer, list) for answer in user_answers[chat_id]["answers"]):
+            user_answers[chat_id]["answers"].append([])  # Создаем список для файлов
+        user_answers[chat_id]["answers"][6].append({"file_id": file_id, "type": file_type})
+        await message.answer("✅ Файл получен. Прикрепите еще или напишите 'Готово' для продолжения.")
     else:
         await message.answer("📎 Отправьте файл только на этапе соответствующего вопроса в анкете.")
 
@@ -201,13 +204,13 @@ async def finish_survey(chat_id, message):
     # Формируем текст анкеты без упоминания файлов
     answers_text = "\n".join(
         f"{questions[i]}: {answer}" for i, answer in enumerate(user_answers[chat_id]["answers"])
-        if not isinstance(answer, dict)
+        if not isinstance(answer, list)
     )
 
     try:
         logger.debug(f"Отправка анкеты в чат {MANAGER_CHAT_ID}")
-        # Собираем все файлы
-        files = [answer for answer in user_answers[chat_id]["answers"] if isinstance(answer, dict)]
+        # Собираем все файлы из списка на позиции 6
+        files = user_answers[chat_id]["answers"][6] if len(user_answers[chat_id]["answers"]) > 6 and isinstance(user_answers[chat_id]["answers"][6], list) else []
         
         if files:
             # Формируем группу медиафайлов
@@ -266,6 +269,11 @@ async def collect_answers_or_faq(message: types.Message):
         if text == "назад" and user_answers[chat_id]["answers"]:
             user_answers[chat_id]["answers"].pop()
             await message.answer(f"🔄 Введите новый ответ:\n\n{questions[len(user_answers[chat_id]['answers'])]}")
+            return
+
+        # Проверяем, на этапе файлов ли мы
+        if len(user_answers[chat_id]["answers"]) == 6 and text != "готово":
+            await message.answer("Прикрепите еще файл или напишите 'Готово' для продолжения.")
             return
 
         user_answers[chat_id]["answers"].append(message.text)
