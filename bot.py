@@ -120,6 +120,12 @@ delivery_keyboard = InlineKeyboardMarkup(
 # Обработка команды /start
 @dp.message(Command("start"))
 async def start(message: types.Message):
+    chat_id = message.chat.id
+    if chat_id in user_answers:
+        del user_answers[chat_id]
+    for media_group_id, group_data in list(media_groups.items()):
+        if group_data["chat_id"] == chat_id:
+            del media_groups[media_group_id]
     await message.answer("Привет! Я помогу вам с заказом. Выберите действие:", reply_markup=start_keyboard)
 
 # Запрос согласия перед анкетой
