@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto, InputMediaDocument
 from aiogram.filters import Command
 from aiogram.enums import ChatType
 from config import Config, load_config
@@ -206,28 +206,31 @@ async def finish_survey(chat_id, message):
 
     try:
         logger.debug(f"Отправка анкеты в чат {MANAGER_CHAT_ID}")
-        # Если есть файл, отправляем его вместе с текстом
+        # Собираем все файлы
         files = [answer for answer in user_answers[chat_id]["answers"] if isinstance(answer, dict)]
+        
         if files:
-            file = files[0]  # Берем первый файл (если нужно несколько, потребуется доработка)
-            if file["type"] == "photo":
-                await bot.send_photo(
-                    MANAGER_CHAT_ID,
-                    file["file_id"],
-                    caption=f"📩 Новая анкета ID {user_answers[chat_id]['id']}:\n\n{answers_text}"
-                )
-            elif file["type"] == "document":
-                await bot.send_document(
-                    MANAGER_CHAT_ID,
-                    file["file_id"],
-                    caption=f"📩 Новая анкета ID {user_answers[chat_id]['id']}:\n\n{answers_text}"
-                )
+            # Формируем группу медиафайлов
+            media_group = []
+            for i, file in enumerate(files):
+                if file["type"] == "photo":
+                    media = InputMediaPhoto(media=file["file_id"])
+                elif file["type"] == "document":
+                    media = InputMediaDocument(media=file["file_id"])
+                # Добавляем текст анкеты к первому файлу
+                if i == 0:
+                    media.caption = f"📩 Новая анкета ID {user_answers[chat_id]['id']}:\n\n{answers_text}"
+                media_group.append(media)
+            
+            # Отправляем группу файлов
+            await bot.send_media_group(MANAGER_CHAT_ID, media=media_group)
         else:
-            # Если файла нет, просто текст
+            # Если файлов нет, отправляем только текст
             await bot.send_message(
                 MANAGER_CHAT_ID,
                 f"📩 Новая анкета ID {user_answers[chat_id]['id']}:\n\n{answers_text}"
             )
+        
         await message.answer("Ваша анкета успешно отправлена! Мы свяжемся с вами в ближайшее время.")
     except Exception as e:
         logger.error(f"Ошибка при отправке в чат менеджеров {MANAGER_CHAT_ID}: {e}")
