@@ -18,7 +18,8 @@ BOT_TOKEN: str = config.tg_bot.token
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-ADMIN_ID = 219614301  # Telegram ID менеджера
+# ID чата с менеджерами (замените на реальный ID вашего чата)
+MANAGER_CHAT_ID = -4634857148 
 
 # Функция для работы с ID анкет
 def load_survey_id():
@@ -120,10 +121,10 @@ async def process_consent(call: types.CallbackQuery):
 
     if call.data == "consent_yes":
         global survey_id_counter
-        user_answers[chat_id] = {"id": survey_id_counter, "answers": []}
+        user_answers[chat_id] = {"id": survey_id_counter, "answers": [], "source_chat": call.message.chat.id}
         survey_id_counter += 1
         save_survey_id(survey_id_counter)
-        await call.message.edit_text(f"Спасибо за согласие! 📝 Начнем.\n\n{questions[0]}")  # Без ID для клиента
+        await call.message.edit_text(f"Спасибо за согласие! 📝 Начнем.\n\n{questions[0]}")
     
     elif call.data == "view_offer":
         try:
@@ -165,23 +166,24 @@ async def show_faq(message: types.Message):
 
 # Завершение анкеты
 async def finish_survey(chat_id, message):
-    answers_text = "\n".join(
+    source_chat = user_answers[chat_id]["source_chat"]  # ID чата, откуда пришла анкета
+    answers_text = f"Источник: Чат ID {source_chat}\n" + "\n".join(
         f"{questions[i]}: {answer}" if not isinstance(answer, dict) else "📎 Прикрепленный файл"
         for i, answer in enumerate(user_answers[chat_id]["answers"])
     )
     try:
-        await bot.send_message(ADMIN_ID, f"📩 Новая анкета ID {user_answers[chat_id]['id']}:\n\n{answers_text}")
+        await bot.send_message(MANAGER_CHAT_ID, f"📩 Новая анкета ID {user_answers[chat_id]['id']}:\n\n{answers_text}")
         if any(isinstance(answer, dict) for answer in user_answers[chat_id]["answers"]):
-            await bot.send_message(ADMIN_ID, f"📎 Файлы к анкете ID {user_answers[chat_id]['id']}:")
+            await bot.send_message(MANAGER_CHAT_ID, f"📎 Файлы к анкете ID {user_answers[chat_id]['id']}:")
             for answer in user_answers[chat_id]["answers"]:
                 if isinstance(answer, dict):
                     if answer["type"] == "photo":
-                        await bot.send_photo(ADMIN_ID, answer["file_id"], caption=f"Фото к анкете ID {user_answers[chat_id]['id']}")
+                        await bot.send_photo(MANAGER_CHAT_ID, answer["file_id"], caption=f"Фото к анкете ID {user_answers[chat_id]['id']}")
                     elif answer["type"] == "document":
-                        await bot.send_document(ADMIN_ID, answer["file_id"], caption=f"Документ к анкете ID {user_answers[chat_id]['id']}")
+                        await bot.send_document(MANAGER_CHAT_ID, answer["file_id"], caption=f"Документ к анкете ID {user_answers[chat_id]['id']}")
         await message.answer("Ваша анкета успешно отправлена! Мы свяжемся с вами в ближайшее время.")
     except Exception as e:
-        logger.error(f"Ошибка при отправке админу: {e}")
+        logger.error(f"Ошибка при отправке в чат менеджеров: {e}")
         await message.answer("Ошибка при отправке анкеты. Свяжитесь с менеджером: @YourManagerTelegram")
     del user_answers[chat_id]
 
