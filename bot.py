@@ -170,25 +170,30 @@ async def process_consent(call: types.CallbackQuery):
 @dp.message(lambda message: message.photo or message.document)
 async def handle_file(message: types.Message):
     chat_id = message.chat.id
-    if chat_id in user_answers:
-        if len(user_answers[chat_id]["answers"]) == 6:
-            # Инициализируем список файлов, если его еще нет
-            if not any(isinstance(answer, list) for answer in user_answers[chat_id]["answers"]):
-                user_answers[chat_id]["answers"].append([])
+    logger.debug(f"Получено сообщение с файлом. Chat ID: {chat_id}, Answers length: {len(user_answers[chat_id]['answers']) if chat_id in user_answers else 'N/A'}")
 
-            # Обрабатываем все фото из сообщения
-            if message.photo:
-                for photo in message.photo:
-                    user_answers[chat_id]["answers"][6].append({"file_id": photo.file_id, "type": "photo"})
-            
-            # Обрабатываем документ, если он есть
-            if message.document:
-                user_answers[chat_id]["answers"][6].append({"file_id": message.document.file_id, "type": "document"})
-            
-            await message.answer("✅ Файл(ы) получены. Прикрепите еще или напишите 'Готово' для продолжения.")
-            return  # Завершаем обработку, чтобы не попадать в другие обработчики
-        
-    await message.answer("📎 Отправьте файл только на этапе соответствующего вопроса в анкете.")
+    if chat_id in user_answers and len(user_answers[chat_id]["answers"]) == 6:
+        # Инициализируем список файлов, если его еще нет
+        if not any(isinstance(answer, list) for answer in user_answers[chat_id]["answers"]):
+            user_answers[chat_id]["answers"].append([])
+            logger.debug(f"Создан список файлов для Chat ID: {chat_id}")
+
+        # Обрабатываем все фото из сообщения
+        if message.photo:
+            for photo in message.photo:
+                user_answers[chat_id]["answers"][6].append({"file_id": photo.file_id, "type": "photo"})
+                logger.debug(f"Добавлено фото: {photo.file_id}")
+
+        # Обрабатываем документ, если он есть
+        if message.document:
+            user_answers[chat_id]["answers"][6].append({"file_id": message.document.file_id, "type": "document"})
+            logger.debug(f"Добавлен документ: {message.document.file_id}")
+
+        await message.answer("✅ Файл(ы) получены. Прикрепите еще или напишите 'Готово' для продолжения.")
+        logger.debug(f"Отправлено подтверждение для Chat ID: {chat_id}")
+    else:
+        await message.answer("📎 Отправьте файл только на этапе соответствующего вопроса в анкете.")
+        logger.debug(f"Отправлено предупреждение для Chat ID: {chat_id}")
 
 # Обработка FAQ
 @dp.message(lambda message: message.text == "Частые вопросы")
@@ -236,12 +241,14 @@ async def finish_survey(chat_id, message):
             
             # Отправляем группу файлов
             await bot.send_media_group(MANAGER_CHAT_ID, media=media_group)
+            logger.debug(f"Отправлена группа файлов для анкеты ID {user_answers[chat_id]['id']}")
         else:
             # Если файлов нет, отправляем только текст
             await bot.send_message(
                 MANAGER_CHAT_ID,
                 f"📩 Новая анкета ID {user_answers[chat_id]['id']}:\n\n{answers_text}"
             )
+            logger.debug(f"Отправлен текст анкеты ID {user_answers[chat_id]['id']}")
         
         await message.answer("Ваша анкета успешно отправлена! Мы свяжемся с вами в ближайшее время.")
     except Exception as e:
@@ -254,6 +261,7 @@ async def finish_survey(chat_id, message):
 async def collect_answers_or_faq(message: types.Message):
     chat_id = message.chat.id
     text = message.text.lower()
+    logger.debug(f"Получено текстовое сообщение: {text}. Chat ID: {chat_id}")
 
     # Обработка FAQ в группах и личных чатах
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
@@ -281,6 +289,7 @@ async def collect_answers_or_faq(message: types.Message):
             if text == "готово":
                 user_answers[chat_id]["answers"].append(text)  # Добавляем "Готово" как индикатор
                 await message.answer(questions[7])  # Переходим к следующему вопросу
+                logger.debug(f"Переход к следующему вопросу после 'Готово'. Chat ID: {chat_id}")
             return  # Ждем "Готово", ничего больше не отправляем
 
         user_answers[chat_id]["answers"].append(message.text)
