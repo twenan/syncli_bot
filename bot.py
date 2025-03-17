@@ -1,10 +1,15 @@
 import asyncio
 import json
+import logging
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto, InputMediaDocument
 from aiogram.filters import Command
 from aiogram.enums import ChatType
 from config import Config, load_config
+
+# Настройка логирования
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 # Загрузка конфигурации бота
 config: Config = load_config()
@@ -13,8 +18,8 @@ BOT_TOKEN: str = config.tg_bot.token
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# ID чата с менеджерами
-MANAGER_CHAT_ID = -4634857148
+# ID чата с менеджерами (замените на ваш реальный ID)
+MANAGER_CHAT_ID = -4634857148  # Проверьте правильность ID с помощью @GetIDsBot
 
 # Функции для работы с ID анкет
 def load_survey_id():
@@ -112,6 +117,7 @@ delivery_keyboard = InlineKeyboardMarkup(
 # Обработка команды /start
 @dp.message(Command("start"))
 async def start(message: types.Message):
+    logger.debug(f"Команда /start получена. Chat ID: {message.chat.id}")
     await message.answer("Привет! Я помогу вам с заказом. Выберите действие:", reply_markup=start_keyboard)
 
 # Запрос согласия перед анкетой
@@ -148,6 +154,7 @@ async def process_consent(call: types.CallbackQuery):
             await bot.send_document(chat_id, document=types.FSInputFile("/home/anna/syncli_bot/offer.pdf"), caption="📄 Оферта")
             await call.message.edit_text("Ознакомьтесь с документом и выберите вариант.", reply_markup=consent_keyboard)
         except Exception as e:
+            logger.error(f"Ошибка при отправке оферты: {e}")
             await call.message.edit_text("Ошибка при загрузке оферты. Попробуйте позже.", reply_markup=consent_keyboard)
 
     elif call.data == "consent_no":
@@ -163,24 +170,30 @@ async def process_consent(call: types.CallbackQuery):
 @dp.message(lambda message: message.photo or message.document)
 async def handle_file(message: types.Message):
     chat_id = message.chat.id
+    logger.debug(f"Получено сообщение с файлом. Chat ID: {chat_id}, Answers length: {len(user_answers[chat_id]['answers']) if chat_id in user_answers else 'N/A'}")
+
     if chat_id in user_answers and len(user_answers[chat_id]["answers"]) == 6:
         # Инициализируем список файлов, если его еще нет
         if not any(isinstance(answer, list) for answer in user_answers[chat_id]["answers"]):
             user_answers[chat_id]["answers"].append([])
+            logger.debug(f"Создан список файлов для Chat ID: {chat_id}")
 
-        # Обрабатываем фото (берем только самое большое разрешение)
+        # Обрабатываем все фото из сообщения
         if message.photo:
-            # Берем последний элемент из списка photo (самое большое разрешение)
-            photo = message.photo[-1]
-            user_answers[chat_id]["answers"][6].append({"file_id": photo.file_id, "type": "photo"})
-        
-        # Обрабатываем документ
+            for photo in message.photo:
+                user_answers[chat_id]["answers"][6].append({"file_id": photo.file_id, "type": "photo"})
+                logger.debug(f"Добавлено фото: {photo.file_id}")
+
+        # Обрабатываем документ, если он есть
         if message.document:
             user_answers[chat_id]["answers"][6].append({"file_id": message.document.file_id, "type": "document"})
-        
+            logger.debug(f"Добавлен документ: {message.document.file_id}")
+
         await message.answer("✅ Файл(ы) получены. Прикрепите еще или напишите 'Готово' для продолжения.")
-        return
-    await message.answer("📎 Отправьте файл только на этапе соответствующего вопроса в анкете.")
+        logger.debug(f"Отправлено подтверждение для Chat ID: {chat_id}")
+    else:
+        await message.answer("📎 Отправьте файл только на этапе соответствующего вопроса в анкете.")
+        logger.debug(f"Отправлено предупреждение для Chat ID: {chat_id}")
 
 # Обработка FAQ
 @dp.message(lambda message: message.text == "Частые вопросы")
@@ -193,6 +206,7 @@ async def show_faq(message: types.Message):
 
 # Завершение анкеты
 async def finish_survey(chat_id, message):
+    # Сохраняем контактные данные нового пользователя
     if str(chat_id) not in users and len(user_answers[chat_id]["answers"]) >= 3:
         users[str(chat_id)] = {
             "name": user_answers[chat_id]["answers"][0],
@@ -201,44 +215,55 @@ async def finish_survey(chat_id, message):
         }
         save_users(users)
 
+    # Формируем текст анкеты без упоминания файлов
     answers_text = "\n".join(
         f"{questions[i]}: {answer}" for i, answer in enumerate(user_answers[chat_id]["answers"])
         if not isinstance(answer, list)
     )
 
     try:
+        logger.debug(f"Отправка анкеты в чат {MANAGER_CHAT_ID}")
+        # Собираем все файлы из списка на позиции 6
         files = user_answers[chat_id]["answers"][6] if len(user_answers[chat_id]["answers"]) > 6 and isinstance(user_answers[chat_id]["answers"][6], list) else []
         
         if files:
+            # Формируем группу медиафайлов
             media_group = []
-            for file in files:  # Проходим по каждому уникальному файлу
+            for i, file in enumerate(files):
                 if file["type"] == "photo":
-                    media_group.append(InputMediaPhoto(media=file["file_id"]))
+                    media = InputMediaPhoto(media=file["file_id"])
                 elif file["type"] == "document":
-                    media_group.append(InputMediaDocument(media=file["file_id"]))
+                    media = InputMediaDocument(media=file["file_id"])
+                # Добавляем текст анкеты к первому файлу
+                if i == 0:
+                    media.caption = f"📩 Новая анкета ID {user_answers[chat_id]['id']}:\n\n{answers_text}"
+                media_group.append(media)
             
-            # Добавляем текст анкеты к первому элементу
-            if media_group:
-                media_group[0].caption = f"📩 Новая анкета ID {user_answers[chat_id]['id']}:\n\n{answers_text}"
-            
+            # Отправляем группу файлов
             await bot.send_media_group(MANAGER_CHAT_ID, media=media_group)
+            logger.debug(f"Отправлена группа файлов для анкеты ID {user_answers[chat_id]['id']}")
         else:
+            # Если файлов нет, отправляем только текст
             await bot.send_message(
                 MANAGER_CHAT_ID,
                 f"📩 Новая анкета ID {user_answers[chat_id]['id']}:\n\n{answers_text}"
             )
+            logger.debug(f"Отправлен текст анкеты ID {user_answers[chat_id]['id']}")
         
         await message.answer("Ваша анкета успешно отправлена! Мы свяжемся с вами в ближайшее время.")
     except Exception as e:
+        logger.error(f"Ошибка при отправке в чат менеджеров {MANAGER_CHAT_ID}: {e}")
         await message.answer("Ошибка при отправке анкеты. Свяжитесь с менеджером: @YourManagerTelegram")
     del user_answers[chat_id]
 
 # Обработка текстовых ответов анкеты и FAQ
-@dp.message(lambda message: message.text)
+@dp.message(lambda message: message.text)  # Обрабатываем только текстовые сообщения
 async def collect_answers_or_faq(message: types.Message):
     chat_id = message.chat.id
     text = message.text.lower()
+    logger.debug(f"Получено текстовое сообщение: {text}. Chat ID: {chat_id}")
 
+    # Обработка FAQ в группах и личных чатах
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
         for keyword, response in faq.items():
             if any(word in text for word in keyword.lower().split()):
@@ -246,28 +271,32 @@ async def collect_answers_or_faq(message: types.Message):
                 return
         return
 
+    # Проверка FAQ в личных чатах
     for keyword, response in faq.items():
         if any(word in text for word in keyword.lower().split()):
             await message.answer(response)
             return
 
+    # Обработка анкеты
     if chat_id in user_answers:
         if text == "назад" and user_answers[chat_id]["answers"]:
             user_answers[chat_id]["answers"].pop()
             await message.answer(f"🔄 Введите новый ответ:\n\n{questions[len(user_answers[chat_id]['answers'])]}")
             return
 
+        # Проверяем, на этапе файлов ли мы
         if len(user_answers[chat_id]["answers"]) == 6:
             if text == "готово":
-                user_answers[chat_id]["answers"].append(text)
-                await message.answer(questions[7])
-            return
+                user_answers[chat_id]["answers"].append(text)  # Добавляем "Готово" как индикатор
+                await message.answer(questions[7])  # Переходим к следующему вопросу
+                logger.debug(f"Переход к следующему вопросу после 'Готово'. Chat ID: {chat_id}")
+            return  # Ждем "Готово", ничего больше не отправляем
 
         user_answers[chat_id]["answers"].append(message.text)
         next_index = len(user_answers[chat_id]["answers"])
 
         if next_index < len(questions):
-            if next_index == 12:
+            if next_index == 12:  # Вопрос о сроке доставки
                 await message.answer("⏳ Выберите срок доставки:", reply_markup=delivery_keyboard)
             else:
                 await message.answer(questions[next_index])
@@ -290,7 +319,7 @@ async def delivery_selected(call: types.CallbackQuery):
             await finish_survey(chat_id, call.message)
     await call.answer()
 
-# Запуск бота1
+# Запуск бота
 async def main():
     await dp.start_polling(bot)
 
