@@ -185,7 +185,7 @@ async def handle_file(message: types.Message):
             user_answers[chat_id]["answers"][6].append({"file_id": message.document.file_id, "type": "document"})
         
         await message.answer("✅ Файл(ы) получены. Прикрепите еще или напишите 'Готово' для продолжения.")
-    else:
+    elif chat_id not in user_answers or len(user_answers[chat_id]["answers"]) != 6:
         await message.answer("📎 Отправьте файл только на этапе соответствующего вопроса в анкете.")
 
 # Обработка FAQ
