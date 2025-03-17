@@ -1,10 +1,15 @@
 import asyncio
 import json
+import logging
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto, InputMediaDocument
 from aiogram.filters import Command
 from aiogram.enums import ChatType
 from config import Config, load_config
+
+# Настройка логирования
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 # Загрузка конфигурации бота
 config: Config = load_config()
@@ -160,47 +165,55 @@ async def process_consent(call: types.CallbackQuery):
         await call.message.edit_text("Свяжитесь с менеджером напрямую: @YourManagerTelegram", reply_markup=None)
 
 # Обработка файлов
-@dp.message(lambda message: message.photo or message.document or message.content_type == 'media_group')
+@dp.message(lambda message: message.photo or message.document)
 async def handle_file(message: types.Message):
     chat_id = message.chat.id
+    logger.debug(f"Получено сообщение. Chat ID: {chat_id}, Media Group ID: {message.media_group_id}, Photo: {bool(message.photo)}, Document: {bool(message.document)}")
+
     if chat_id in user_answers and len(user_answers[chat_id]["answers"]) == 6:
         # Инициализируем список файлов, если его еще нет
         if not any(isinstance(answer, list) for answer in user_answers[chat_id]["answers"]):
             user_answers[chat_id]["answers"].append([])
+            logger.debug(f"Создан новый список файлов для Chat ID: {chat_id}")
 
-        # Обрабатываем медиагруппу (несколько фото или файлов в одном сообщении)
+        # Обрабатываем медиагруппу или одиночные файлы
+        files_list = user_answers[chat_id]["answers"][6]
         if message.media_group_id:
-            # Медиагруппы обрабатываются через отдельные сообщения, пропускаем дубли
-            if any(file["media_group_id"] == message.media_group_id for file in user_answers[chat_id]["answers"][6]):
-                return
-            if message.photo:
-                photo = message.photo[-1]  # Берем самое большое разрешение
-                user_answers[chat_id]["answers"][6].append({
-                    "file_id": photo.file_id,
-                    "type": "photo",
-                    "media_group_id": message.media_group_id
-                })
-            elif message.document:
-                user_answers[chat_id]["answers"][6].append({
-                    "file_id": message.document.file_id,
-                    "type": "document",
-                    "media_group_id": message.media_group_id
-                })
+            # Проверяем, не добавлен ли уже файл из этой медиагруппы
+            if not any(file.get("media_group_id") == message.media_group_id for file in files_list):
+                if message.photo:
+                    photo = message.photo[-1]  # Берем самое большое разрешение
+                    files_list.append({
+                        "file_id": photo.file_id,
+                        "type": "photo",
+                        "media_group_id": message.media_group_id
+                    })
+                    logger.debug(f"Добавлено фото из медиагруппы: {photo.file_id}, Media Group ID: {message.media_group_id}")
+                elif message.document:
+                    files_list.append({
+                        "file_id": message.document.file_id,
+                        "type": "document",
+                        "media_group_id": message.media_group_id
+                    })
+                    logger.debug(f"Добавлен документ из медиагруппы: {message.document.file_id}, Media Group ID: {message.media_group_id}")
         else:
-            # Обрабатываем одиночные файлы
+            # Одиночные файлы
             if message.photo:
                 photo = message.photo[-1]
-                user_answers[chat_id]["answers"][6].append({
+                files_list.append({
                     "file_id": photo.file_id,
                     "type": "photo"
                 })
+                logger.debug(f"Добавлено одиночное фото: {photo.file_id}")
             elif message.document:
-                user_answers[chat_id]["answers"][6].append({
+                files_list.append({
                     "file_id": message.document.file_id,
                     "type": "document"
                 })
+                logger.debug(f"Добавлен одиночный документ: {message.document.file_id}")
 
         await message.answer("✅ Файл(ы) получены. Прикрепите еще или напишите 'Готово' для продолжения.")
+        logger.debug(f"Текущий список файлов для Chat ID {chat_id}: {files_list}")
         return
     await message.answer("📎 Отправьте файл только на этапе соответствующего вопроса в анкете.")
 
@@ -230,19 +243,24 @@ async def finish_survey(chat_id, message):
 
     try:
         files = user_answers[chat_id]["answers"][6] if len(user_answers[chat_id]["answers"]) > 6 and isinstance(user_answers[chat_id]["answers"][6], list) else []
+        logger.debug(f"Отправка файлов менеджеру для Chat ID {chat_id}: {files}")
         
         if files:
             media_group = []
+            unique_file_ids = set()  # Для предотвращения дублей
             for file in files:
-                if file["type"] == "photo":
-                    media_group.append(InputMediaPhoto(media=file["file_id"]))
-                elif file["type"] == "document":
-                    media_group.append(InputMediaDocument(media=file["file_id"]))
+                file_id = file["file_id"]
+                if file_id not in unique_file_ids:  # Добавляем только уникальные файлы
+                    if file["type"] == "photo":
+                        media_group.append(InputMediaPhoto(media=file_id))
+                    elif file["type"] == "document":
+                        media_group.append(InputMediaDocument(media=file_id))
+                    unique_file_ids.add(file_id)
             
             if media_group:
                 media_group[0].caption = f"📩 Новая анкета ID {user_answers[chat_id]['id']}:\n\n{answers_text}"
-            
-            await bot.send_media_group(MANAGER_CHAT_ID, media=media_group)
+                await bot.send_media_group(MANAGER_CHAT_ID, media=media_group)
+                logger.debug(f"Отправлена медиагруппа с {len(media_group)} файлами")
         else:
             await bot.send_message(
                 MANAGER_CHAT_ID,
@@ -251,6 +269,7 @@ async def finish_survey(chat_id, message):
         
         await message.answer("Ваша анкета успешно отправлена! Мы свяжемся с вами в ближайшее время.")
     except Exception as e:
+        logger.error(f"Ошибка при отправке: {e}")
         await message.answer("Ошибка при отправке анкеты. Свяжитесь с менеджером: @YourManagerTelegram")
     del user_answers[chat_id]
 
