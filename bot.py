@@ -174,6 +174,7 @@ async def process_consent(call: types.CallbackQuery):
         await call.message.edit_text("Свяжитесь с менеджером напрямую: @YourManagerTelegram", reply_markup=None)
 
 # Обработка файлов
+# Обработка файлов
 @dp.message(lambda message: message.photo or message.document)
 async def handle_file(message: types.Message):
     chat_id = message.chat.id
@@ -223,9 +224,24 @@ async def handle_file(message: types.Message):
 
             await message.answer("✅ Файл получен. Прикрепите еще или напишите 'Готово' для продолжения.")
             logger.debug(f"Текущий список файлов для Chat ID {chat_id}: {files_list}")
-    else:
-        await message.answer("📎 Отправьте файл только на этапе соответствующего вопроса в анкете.")
 
+
+# Функция для обработки завершения медиагруппы
+@dp.message(lambda message: message.text and message.text.lower() == "готово")
+async def handle_ready(message: types.Message):
+    chat_id = message.chat.id
+
+    if chat_id in user_answers and len(user_answers[chat_id]["answers"]) == 6:
+        files_list = user_answers[chat_id]["answers"][6]
+
+        # Добавляем файлы из медиагрупп, если они есть
+        for media_group_id, group_data in media_groups.items():
+            if group_data["chat_id"] == chat_id:
+                files_list.extend(group_data["files"])
+                del media_groups[media_group_id]  # Удаляем обработанную группу
+
+        await message.answer("✅ Все файлы получены. Продолжаем заполнение анкеты.")
+        await message.answer(questions[7])  # Переходим к следующему вопросу
 # Функция для обработки завершения медиагруппы
 @dp.message(lambda message: message.text and message.text.lower() == "готово")
 async def handle_ready(message: types.Message):
