@@ -18,6 +18,9 @@ BOT_TOKEN: str = config.tg_bot.token
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
+# Глобальный словарь для хранения медиагрупп
+media_groups = {}
+
 # ID чата с менеджерами
 MANAGER_CHAT_ID = -4634857148
 
@@ -177,34 +180,62 @@ async def handle_file(message: types.Message):
             logger.debug(f"Создан новый список файлов для Chat ID: {chat_id}")
 
         files_list = user_answers[chat_id]["answers"][6]
-        file_added = False
 
-        # Обрабатываем фото или документ
-        if message.photo:
-            photo = message.photo[-1]  # Берем самое большое разрешение
-            if not any(file["file_id"] == photo.file_id for file in files_list):  # Проверяем, нет ли дубля
+        # Если это медиагруппа, сохраняем файлы во временный словарь
+        if message.media_group_id:
+            if message.media_group_id not in media_groups:
+                media_groups[message.media_group_id] = {"chat_id": chat_id, "files": []}
+
+            if message.photo:
+                photo = message.photo[-1]  # Берем самое большое разрешение
+                media_groups[message.media_group_id]["files"].append({
+                    "file_id": photo.file_id,
+                    "type": "photo"
+                })
+            elif message.document:
+                media_groups[message.media_group_id]["files"].append({
+                    "file_id": message.document.file_id,
+                    "type": "document"
+                })
+
+            logger.debug(f"Добавлен файл в медиагруппу {message.media_group_id} для Chat ID {chat_id}")
+            return  # Не отправляем ответ, пока не соберем всю группу
+
+        # Если это одиночный файл
+        else:
+            if message.photo:
+                photo = message.photo[-1]
                 files_list.append({
                     "file_id": photo.file_id,
-                    "type": "photo",
-                    "media_group_id": message.media_group_id if message.media_group_id else None
+                    "type": "photo"
                 })
-                logger.debug(f"Добавлено фото: {photo.file_id}, Media Group ID: {message.media_group_id}")
-                file_added = True
-        elif message.document:
-            if not any(file["file_id"] == message.document.file_id for file in files_list):  # Проверяем, нет ли дубля
+            elif message.document:
                 files_list.append({
                     "file_id": message.document.file_id,
-                    "type": "document",
-                    "media_group_id": message.media_group_id if message.media_group_id else None
+                    "type": "document"
                 })
-                logger.debug(f"Добавлен документ: {message.document.file_id}, Media Group ID: {message.media_group_id}")
-                file_added = True
 
-        if file_added:
-            await message.answer("✅ Файл(ы) получены. Прикрепите еще или напишите 'Готово' для продолжения.")
-        logger.debug(f"Текущий список файлов для Chat ID {chat_id}: {files_list}")
-        return
-    await message.answer("📎 Отправьте файл только на этапе соответствующего вопроса в анкете.")
+            await message.answer("✅ Файл получен. Прикрепите еще или напишите 'Готово' для продолжения.")
+            logger.debug(f"Текущий список файлов для Chat ID {chat_id}: {files_list}")
+    else:
+        await message.answer("📎 Отправьте файл только на этапе соответствующего вопроса в анкете.")
+
+# Функция для обработки завершения медиагруппы
+@dp.message(lambda message: message.text and message.text.lower() == "готово")
+async def handle_ready(message: types.Message):
+    chat_id = message.chat.id
+
+    if chat_id in user_answers and len(user_answers[chat_id]["answers"]) == 6:
+        files_list = user_answers[chat_id]["answers"][6]
+
+        # Добавляем файлы из медиагрупп, если они есть
+        for media_group_id, group_data in media_groups.items():
+            if group_data["chat_id"] == chat_id:
+                files_list.extend(group_data["files"])
+                del media_groups[media_group_id]  # Удаляем обработанную группу
+
+        await message.answer("✅ Все файлы получены. Продолжаем заполнение анкеты.")
+        await message.answer(questions[7])  # Переходим к следующему вопросу
 
 # Обработка FAQ
 @dp.message(lambda message: message.text == "Частые вопросы")
@@ -260,6 +291,12 @@ async def finish_survey(chat_id, message):
     except Exception as e:
         logger.error(f"Ошибка при отправке: {e}")
         await message.answer("Ошибка при отправке анкеты. Свяжитесь с менеджером: @YourManagerTelegram")
+    
+    # Очистка медиагрупп
+    for media_group_id, group_data in list(media_groups.items()):
+        if group_data["chat_id"] == chat_id:
+            del media_groups[media_group_id]
+    
     del user_answers[chat_id]
 
 # Обработка текстовых ответов анкеты и FAQ
