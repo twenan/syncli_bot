@@ -10,53 +10,65 @@ import aiohttp
 from io import BytesIO
 from openpyxl import load_workbook
 
-# Настройка логирования
+# Настройка логирования для вывода отладочной информации
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-# Загрузка конфигурации бота
+# Загрузка конфигурации бота из файла config.py
 config: Config = load_config()
 BOT_TOKEN: str = config.tg_bot.token
 
+# Инициализация бота и диспетчера для обработки сообщений
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Глобальные переменные
+# Глобальные переменные:
+# media_groups - словарь для хранения медиагрупп (фото/документы) пользователей
+# faq - словарь для хранения часто задаваемых вопросов
+# YANDEX_DISK_TOKEN - токен для доступа к Яндекс.Диску
+# FILE_PATH - путь к файлу faq.xlsx на Яндекс.Диске
+# MANAGER_CHAT_ID - ID чата для отправки анкет менеджеру
 media_groups = {}
 faq = {}
-YANDEX_DISK_TOKEN = "y0__xD-s5TpBxijkzYgie2UyhKmZIBRVpLHIieiT1CMAYGOMXpgHQ"  # Вставьте ваш токен в кавычках
-FILE_PATH = "faq.xlsx"  # Путь к файлу в кавычках
+YANDEX_DISK_TOKEN = "y0__xD-s5TpBxijkzYgie2UyhKmZIBRVpLHIieiT1CMAYGOMXpgHQ"  # Проверьте полный токен
+FILE_PATH = "faq.xlsx"  # Убедитесь, что файл в корне Яндекс.Диска
 MANAGER_CHAT_ID = -4634857148
 
-# Функции для работы с ID анкет
+# Функция загрузки текущего ID анкеты из файла
 def load_survey_id():
+    """Читает последний ID анкеты из файла survey_id.txt. Если файла нет, возвращает 1."""
     try:
         with open("survey_id.txt", "r") as f:
             return int(f.read())
     except:
         return 1
 
+# Функция сохранения текущего ID анкеты в файл
 def save_survey_id(counter):
+    """Записывает новый ID анкеты в файл survey_id.txt."""
     with open("survey_id.txt", "w") as f:
         f.write(str(counter))
 
 survey_id_counter = load_survey_id()
 
-# Функции для работы с данными пользователей
+# Функция загрузки данных пользователей из файла
 def load_users():
+    """Читает данные пользователей из users.json. Если файла нет, возвращает пустой словарь."""
     try:
         with open("users.json", "r") as f:
             return json.load(f)
     except:
         return {}
 
+# Функция сохранения данных пользователей в файл
 def save_users(users):
+    """Записывает данные пользователей в users.json с поддержкой кириллицы."""
     with open("users.json", "w") as f:
         json.dump(users, f, ensure_ascii=False, indent=4)
 
 users = load_users()
 
-# Вопросы анкеты
+# Список вопросов анкеты
 questions = [
     "Ваше имя и фамилия",
     "Ваш ник в Telegram (через @)",
@@ -75,47 +87,61 @@ questions = [
     "Перечислите вопросы для поставщика (если есть, укажите здесь)"
 ]
 
+# Словарь для хранения ответов пользователей
 user_answers = {}
 
-# Функция загрузки FAQ с Яндекс.Диска (для .xlsx)
+# Функция загрузки FAQ из файла на Яндекс.Диске
 async def load_faq_from_yandex_disk():
+    """Загружает файл faq.xlsx с Яндекс.Диска и парсит его в словарь FAQ."""
     url = f"https://cloud-api.yandex.net/v1/disk/resources/download?path=/{FILE_PATH}"
     headers = {"Authorization": f"OAuth {YANDEX_DISK_TOKEN}"}
     
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=headers) as response:
-            if response.status == 200:
-                download_data = await response.json()
-                download_url = download_data["href"]
-                async with session.get(download_url) as file_response:
-                    xlsx_content = await file_response.read()  # Читаем бинарные данные
-                    faq_dict = {}
-                    # Парсим .xlsx с помощью openpyxl
-                    workbook = load_workbook(filename=BytesIO(xlsx_content))
-                    sheet = workbook.active
-                    for row in sheet.iter_rows(min_row=2, values_only=True):  # Пропускаем заголовок
-                        question, answer = row[0], row[1]  # Предполагаем, что колонки: question, answer
-                        if question and answer:  # Проверяем, что ячейки не пустые
-                            faq_dict[str(question).lower()] = str(answer)
-                    logger.debug(f"FAQ успешно загружен: {faq_dict}")
-                    return faq_dict
-            else:
-                logger.error(f"Ошибка загрузки FAQ: {response.status} - {await response.text()}")
-                return {}
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers) as response:
+                if response.status == 200:
+                    download_data = await response.json()
+                    download_url = download_data["href"]
+                    async with session.get(download_url) as file_response:
+                        if file_response.status == 200:
+                            xlsx_content = await file_response.read()
+                            faq_dict = {}
+                            workbook = load_workbook(filename=BytesIO(xlsx_content))
+                            sheet = workbook.active
+                            for row in sheet.iter_rows(min_row=2, values_only=True):
+                                question, answer = row[0], row[1]
+                                if question and answer:
+                                    faq_dict[str(question).lower()] = str(answer)
+                            logger.debug(f"FAQ успешно загружен: {faq_dict}")
+                            return faq_dict
+                        else:
+                            logger.error(f"Ошибка загрузки файла: {file_response.status}")
+                            return {}
+                else:
+                    logger.error(f"Ошибка получения ссылки: {response.status} - {await response.text()}")
+                    return {}
+    except Exception as e:
+        logger.error(f"Исключение при загрузке FAQ: {str(e)}")
+        return {}
 
-# Функция обновления FAQ
+# Функция обновления глобального словаря FAQ
 async def update_faq():
+    """Обновляет глобальный словарь faq данными из Яндекс.Диска, добавляет заглушку при ошибке."""
     global faq
     faq = await load_faq_from_yandex_disk()
+    if not faq:
+        logger.warning("FAQ пустой, использую заглушку")
+        faq = {"доставка": "Информация о доставке временно недоступна"}
 
-# Периодическое обновление FAQ
+# Функция периодического обновления FAQ
 async def periodic_faq_update():
+    """Запускает обновление FAQ каждые 60 минут в фоновом режиме."""
     while True:
         await update_faq()
         logger.debug("FAQ обновлен из Яндекс.Диска")
-        await asyncio.sleep(3600)  # Обновление каждые 60 минут
+        await asyncio.sleep(3600)
 
-# Главное меню
+# Клавиатура главного меню
 start_keyboard = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Заполнить анкету")],
@@ -125,7 +151,7 @@ start_keyboard = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
-# Инлайн-клавиатуры
+# Инлайн-клавиатура для согласия на обработку данных
 consent_keyboard = InlineKeyboardMarkup(
     inline_keyboard=[
         [InlineKeyboardButton(text="✅ Да", callback_data="consent_yes")],
@@ -134,6 +160,7 @@ consent_keyboard = InlineKeyboardMarkup(
     ]
 )
 
+# Инлайн-клавиатура для второго шанса согласия
 consent_second_keyboard = InlineKeyboardMarkup(
     inline_keyboard=[
         [InlineKeyboardButton(text="✅ Да", callback_data="consent_yes")],
@@ -141,6 +168,7 @@ consent_second_keyboard = InlineKeyboardMarkup(
     ]
 )
 
+# Инлайн-клавиатура для выбора срока доставки
 delivery_keyboard = InlineKeyboardMarkup(
     inline_keyboard=[
         [InlineKeyboardButton(text="10-13 дней", callback_data="10-13")],
@@ -150,9 +178,10 @@ delivery_keyboard = InlineKeyboardMarkup(
     ]
 )
 
-# Обработка команды /start
+# Обработчик команды /start
 @dp.message(Command("start"))
 async def start(message: types.Message):
+    """Очищает данные пользователя и показывает главное меню."""
     chat_id = message.chat.id
     if chat_id in user_answers:
         del user_answers[chat_id]
@@ -161,17 +190,19 @@ async def start(message: types.Message):
             del media_groups[media_group_id]
     await message.answer("Привет! Я помогу вам с заказом. Выберите действие:", reply_markup=start_keyboard)
 
-# Запрос согласия перед анкетой
+# Обработчик кнопки "Заполнить анкету"
 @dp.message(lambda message: message.text == "Заполнить анкету")
 async def request_consent(message: types.Message):
+    """Запрашивает согласие на обработку персональных данных."""
     await message.answer(
         "Перед заполнением анкеты, пожалуйста, дайте согласие на обработку персональных данных.",
         reply_markup=consent_keyboard
     )
 
-# Обработка согласия
+# Обработчик callback-запросов для согласия
 @dp.callback_query(lambda call: call.data in ["consent_yes", "consent_no", "view_offer", "final_no"])
 async def process_consent(call: types.CallbackQuery):
+    """Обрабатывает выбор пользователя по согласию на обработку данных."""
     chat_id = call.message.chat.id
     if call.data == "consent_yes":
         global survey_id_counter
@@ -201,9 +232,10 @@ async def process_consent(call: types.CallbackQuery):
     elif call.data == "final_no":
         await call.message.edit_text("Свяжитесь с менеджером напрямую: @YourManagerTelegram", reply_markup=None)
 
-# Обработка файлов
+# Обработчик файлов (фото/документы)
 @dp.message(lambda message: message.photo or message.document)
 async def handle_file(message: types.Message):
+    """Обрабатывает отправку файлов пользователем на этапе анкеты."""
     chat_id = message.chat.id
     logger.debug(f"Получено сообщение. Chat ID: {chat_id}, Media Group ID: {message.media_group_id}, Photo: {bool(message.photo)}, Document: {bool(message.document)}")
     if chat_id in user_answers and len(user_answers[chat_id]["answers"]) == 6:
@@ -240,9 +272,10 @@ async def handle_file(message: types.Message):
         return
     await message.answer("📎 Отправьте файл только на этапе соответствующего вопроса в анкете.")
 
-# Обработка "Готово"
+# Обработчик команды "Готово" для завершения загрузки файлов
 @dp.message(lambda message: message.text and message.text.lower() == "готово")
 async def handle_ready(message: types.Message):
+    """Завершает этап загрузки файлов и переходит к следующему вопросу."""
     chat_id = message.chat.id
     logger.debug(f"Получено 'Готово'. Chat ID: {chat_id}, user_answers: {user_answers.get(chat_id)}")
     if chat_id in user_answers:
@@ -262,17 +295,19 @@ async def handle_ready(message: types.Message):
             logger.debug(f"После 'Готово' user_answers для Chat ID {chat_id}: {user_answers[chat_id]}")
             return
 
-# Обработка FAQ
+# Обработчик кнопки "Частые вопросы"
 @dp.message(lambda message: message.text == "Частые вопросы")
 async def show_faq(message: types.Message):
+    """Показывает список часто задаваемых вопросов из словаря faq."""
     chat_id = message.chat.id
     if chat_id in user_answers:
         del user_answers[chat_id]
     response = "📌 Часто задаваемые вопросы:\n\n" + "\n".join(f"👉 {k.capitalize()}" for k in faq) + "\n\nНапишите ваш вопрос!"
     await message.answer(response)
 
-# Завершение анкеты
+# Функция завершения анкеты и отправки данных менеджеру
 async def finish_survey(chat_id, message):
+    """Сохраняет данные пользователя и отправляет анкету менеджеру."""
     if str(chat_id) not in users and len(user_answers[chat_id]["answers"]) >= 3:
         users[str(chat_id)] = {
             "name": user_answers[chat_id]["answers"][0],
@@ -310,9 +345,10 @@ async def finish_survey(chat_id, message):
             del media_groups[media_group_id]
     del user_answers[chat_id]
 
-# Обработка текстовых ответов анкеты и FAQ
+# Обработчик текстовых сообщений для анкеты и FAQ
 @dp.message(lambda message: message.text)
 async def collect_answers_or_faq(message: types.Message):
+    """Собирает ответы на анкету или отвечает на вопросы из FAQ."""
     chat_id = message.chat.id
     text = message.text.lower()
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
@@ -346,9 +382,10 @@ async def collect_answers_or_faq(message: types.Message):
         if message.chat.type == ChatType.PRIVATE:
             await message.answer("Я пока не знаю ответа на этот вопрос, но передам его менеджеру!")
 
-# Выбор срока доставки
+# Обработчик выбора срока доставки
 @dp.callback_query(lambda call: call.data in ["10-13", "15-18", "25-30", "avia"])
 async def delivery_selected(call: types.CallbackQuery):
+    """Обрабатывает выбор срока доставки из инлайн-клавиатуры."""
     chat_id = call.message.chat.id
     if chat_id in user_answers:
         user_answers[chat_id]["answers"].append(call.data)
@@ -359,11 +396,16 @@ async def delivery_selected(call: types.CallbackQuery):
             await finish_survey(chat_id, call.message)
     await call.answer()
 
-# Запуск бота
+# Главная функция запуска бота
 async def main():
-    await update_faq()  # Загружаем FAQ при старте
-    asyncio.create_task(periodic_faq_update())  # Запускаем периодическое обновление
-    await dp.start_polling(bot)
+    """Запускает бота: загружает FAQ, запускает обновление и начинает обработку сообщений."""
+    try:
+        logger.info("Запуск бота...")
+        await update_faq()  # Загружаем FAQ при старте
+        asyncio.create_task(periodic_faq_update())  # Запускаем периодическое обновление
+        await dp.start_polling(bot)
+    except Exception as e:
+        logger.error(f"Ошибка при запуске бота: {str(e)}")
 
 if __name__ == '__main__':
     asyncio.run(main())
