@@ -7,8 +7,8 @@ from aiogram.filters import Command
 from aiogram.enums import ChatType
 from config import Config, load_config
 import aiohttp
-import csv
-from io import StringIO
+from io import BytesIO
+from openpyxl import load_workbook
 
 # Настройка логирования
 logging.basicConfig(level=logging.DEBUG)
@@ -23,9 +23,9 @@ dp = Dispatcher()
 
 # Глобальные переменные
 media_groups = {}
-faq = {}  # Изначально пустой словарь для FAQ
-YANDEX_DISK_TOKEN = "AQAAAA..."  # Замените на ваш токен Яндекс.Диска
-FILE_PATH = "FAQ.csv"  # Путь к файлу на Яндекс.Диске
+faq = {}
+YANDEX_DISK_TOKEN = "y0__xD-s5TpBxijkzYgie2UyhKmZIBRVpLHIieiT1CMAYGOMXpgHQ"  # Вставьте ваш токен в кавычках
+FILE_PATH = "faq.xlsx"  # Путь к файлу в кавычках
 MANAGER_CHAT_ID = -4634857148
 
 # Функции для работы с ID анкет
@@ -77,7 +77,7 @@ questions = [
 
 user_answers = {}
 
-# Функция загрузки FAQ с Яндекс.Диска
+# Функция загрузки FAQ с Яндекс.Диска (для .xlsx)
 async def load_faq_from_yandex_disk():
     url = f"https://cloud-api.yandex.net/v1/disk/resources/download?path=/{FILE_PATH}"
     headers = {"Authorization": f"OAuth {YANDEX_DISK_TOKEN}"}
@@ -88,12 +88,15 @@ async def load_faq_from_yandex_disk():
                 download_data = await response.json()
                 download_url = download_data["href"]
                 async with session.get(download_url) as file_response:
-                    csv_content = await file_response.text()
+                    xlsx_content = await file_response.read()  # Читаем бинарные данные
                     faq_dict = {}
-                    csv_file = StringIO(csv_content)
-                    reader = csv.DictReader(csv_file)
-                    for row in reader:
-                        faq_dict[row["question"].lower()] = row["answer"]
+                    # Парсим .xlsx с помощью openpyxl
+                    workbook = load_workbook(filename=BytesIO(xlsx_content))
+                    sheet = workbook.active
+                    for row in sheet.iter_rows(min_row=2, values_only=True):  # Пропускаем заголовок
+                        question, answer = row[0], row[1]  # Предполагаем, что колонки: question, answer
+                        if question and answer:  # Проверяем, что ячейки не пустые
+                            faq_dict[str(question).lower()] = str(answer)
                     logger.debug(f"FAQ успешно загружен: {faq_dict}")
                     return faq_dict
             else:
