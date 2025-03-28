@@ -18,20 +18,15 @@ logger = logging.getLogger(__name__)
 config: Config = load_config()
 BOT_TOKEN: str = config.tg_bot.token
 
-# Инициализация бота и диспетчера для обработки сообщений
+# Инициализация бота и диспетчера
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Глобальные переменные:
-# media_groups - словарь для хранения медиагрупп (фото/документы) пользователей
-# faq - словарь для хранения часто задаваемых вопросов
-# YANDEX_DISK_TOKEN - токен для доступа к Яндекс.Диску
-# FILE_PATH - путь к файлу faq.xlsx на Яндекс.Диске
-# MANAGER_CHAT_ID - ID чата для отправки анкет менеджеру
+# Глобальные переменные
 media_groups = {}
 faq = {}
 YANDEX_DISK_TOKEN = "y0__xD-s5TpBxijkzYgie2UyhKmZIBRVpLHIieiT1CMAYGOMXpgHQ"  # Проверьте полный токен
-FILE_PATH = "faq.xlsx"  # Убедитесь, что файл в корне Яндекс.Диска
+FILE_PATH = "faq.xlsx"
 MANAGER_CHAT_ID = -4634857148
 
 # Функция загрузки текущего ID анкеты из файла
@@ -87,7 +82,6 @@ questions = [
     "Перечислите вопросы для поставщика (если есть, укажите здесь)"
 ]
 
-# Словарь для хранения ответов пользователей
 user_answers = {}
 
 # Функция загрузки FAQ из файла на Яндекс.Диске
@@ -95,7 +89,6 @@ async def load_faq_from_yandex_disk():
     """Загружает файл faq.xlsx с Яндекс.Диска и парсит его в словарь FAQ."""
     url = f"https://cloud-api.yandex.net/v1/disk/resources/download?path=/{FILE_PATH}"
     headers = {"Authorization": f"OAuth {YANDEX_DISK_TOKEN}"}
-    
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers) as response:
@@ -223,6 +216,7 @@ async def process_consent(call: types.CallbackQuery):
             await bot.send_document(chat_id, document=types.FSInputFile("/home/anna/syncli_bot/offer.pdf"), caption="📄 Оферта")
             await call.message.edit_text("Ознакомьтесь с документом и выберите вариант.", reply_markup=consent_keyboard)
         except Exception as e:
+            logger.error(f"Ошибка при отправке оферты: {str(e)}")
             await call.message.edit_text("Ошибка при загрузке оферты. Попробуйте позже.", reply_markup=consent_keyboard)
     elif call.data == "consent_no":
         await call.message.edit_text(
@@ -348,19 +342,42 @@ async def finish_survey(chat_id, message):
 # Обработчик текстовых сообщений для анкеты и FAQ
 @dp.message(lambda message: message.text)
 async def collect_answers_or_faq(message: types.Message):
-    """Собирает ответы на анкету или отвечает на вопросы из FAQ."""
+    """Собирает ответы на анкету или отвечает на вопросы из FAQ с улучшенным поиском."""
     chat_id = message.chat.id
     text = message.text.lower()
+
+    # Обработка сообщений в группах (только FAQ)
     if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+        best_match = None
+        max_words_matched = 0
+        text_words = set(text.split())  # Разбиваем запрос на слова
+
         for keyword, response in faq.items():
-            if any(word in text for word in keyword.lower().split()):
-                await message.reply(response)
-                return
+            keyword_words = set(keyword.lower().split())
+            matched_words = len(text_words & keyword_words)  # Считаем совпадения слов
+            if matched_words > max_words_matched:
+                max_words_matched = matched_words
+                best_match = response
+        if best_match:
+            await message.reply(best_match)
         return
+
+    # Обработка FAQ в личных чатах
+    best_match = None
+    max_words_matched = 0
+    text_words = set(text.split())  # Разбиваем запрос на слова
+
     for keyword, response in faq.items():
-        if any(word in text for word in keyword.lower().split()):
-            await message.answer(response)
-            return
+        keyword_words = set(keyword.lower().split())
+        matched_words = len(text_words & keyword_words)  # Считаем совпадения слов
+        if matched_words > max_words_matched:
+            max_words_matched = matched_words
+            best_match = response
+    if best_match:
+        await message.answer(best_match)
+        return
+
+    # Обработка анкеты
     if chat_id in user_answers:
         if text == "назад" and user_answers[chat_id]["answers"]:
             user_answers[chat_id]["answers"].pop()
@@ -401,11 +418,13 @@ async def main():
     """Запускает бота: загружает FAQ, запускает обновление и начинает обработку сообщений."""
     try:
         logger.info("Запуск бота...")
-        await update_faq()  # Загружаем FAQ при старте
-        asyncio.create_task(periodic_faq_update())  # Запускаем периодическое обновление
-        await dp.start_polling(bot)
+        await update_faq()  # Загружаем FAQ перед запуском
+        asyncio.create_task(periodic_faq_update())  # Запускаем периодическое обновление FAQ
+        logger.info("Начинаем polling...")
+        await dp.start_polling(bot)  # Запускаем опрос Telegram API
     except Exception as e:
         logger.error(f"Ошибка при запуске бота: {str(e)}")
+        raise  # Повторно поднимаем исключение для диагностики
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     asyncio.run(main())
