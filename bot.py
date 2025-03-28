@@ -292,12 +292,32 @@ async def handle_ready(message: types.Message):
 # Обработчик кнопки "Частые вопросы"
 @dp.message(lambda message: message.text == "Частые вопросы")
 async def show_faq(message: types.Message):
-    """Показывает список часто задаваемых вопросов из словаря faq."""
+    """Показывает список часто задаваемых вопросов из словаря faq, разбивая на части при необходимости."""
     chat_id = message.chat.id
     if chat_id in user_answers:
         del user_answers[chat_id]
-    response = "📌 Часто задаваемые вопросы:\n\n" + "\n".join(f"👉 {k.capitalize()}" for k in faq) + "\n\nНапишите ваш вопрос!"
-    await message.answer(response)
+    
+    # Начало сообщения
+    base_text = "📌 Часто задаваемые вопросы:\n\n"
+    messages = []
+    current_message = base_text
+    max_length = 4000  # Оставляем запас от лимита 4096
+
+    # Формируем список вопросов
+    for question in faq.keys():
+        line = f"👉 {question.capitalize()}\n"
+        if len(current_message) + len(line) > max_length:
+            messages.append(current_message)
+            current_message = base_text  # Начинаем новое сообщение
+        current_message += line
+    
+    # Добавляем последнее сообщение
+    current_message += "\nНапишите ваш вопрос!"
+    messages.append(current_message)
+
+    # Отправляем все части
+    for msg in messages:
+        await message.answer(msg)
 
 # Функция завершения анкеты и отправки данных менеджеру
 async def finish_survey(chat_id, message):
