@@ -292,32 +292,41 @@ async def handle_ready(message: types.Message):
 # Обработчик кнопки "Частые вопросы"
 @dp.message(lambda message: message.text == "Частые вопросы")
 async def show_faq(message: types.Message):
-    """Показывает список часто задаваемых вопросов из словаря faq, разбивая на части при необходимости."""
+    """Показывает список часто задаваемых вопросов из словаря faq, разбивая на части."""
     chat_id = message.chat.id
     if chat_id in user_answers:
         del user_answers[chat_id]
     
-    # Начало сообщения
+    logger.debug(f"FAQ для отображения: {faq}")
+    if not faq:
+        await message.answer("Список вопросов временно недоступен.")
+        return
+
+    # Формируем сообщения
     base_text = "📌 Часто задаваемые вопросы:\n\n"
     messages = []
     current_message = base_text
-    max_length = 4000  # Оставляем запас от лимита 4096
+    max_length = 3900  # Уменьшаем лимит для безопасности
 
-    # Формируем список вопросов
     for question in faq.keys():
         line = f"👉 {question.capitalize()}\n"
         if len(current_message) + len(line) > max_length:
-            messages.append(current_message)
-            current_message = base_text  # Начинаем новое сообщение
+            messages.append(current_message.strip())
+            current_message = base_text
         current_message += line
     
-    # Добавляем последнее сообщение
+    # Добавляем финальное сообщение
     current_message += "\nНапишите ваш вопрос!"
-    messages.append(current_message)
+    messages.append(current_message.strip())
 
     # Отправляем все части
-    for msg in messages:
-        await message.answer(msg)
+    try:
+        for i, msg in enumerate(messages):
+            await message.answer(msg)
+            logger.debug(f"Отправлена часть {i+1}/{len(messages)}, длина: {len(msg)}")
+    except Exception as e:
+        logger.error(f"Ошибка отправки FAQ: {str(e)}")
+        await message.answer("Ошибка при отображении списка вопросов.")
 
 # Функция завершения анкеты и отправки данных менеджеру
 async def finish_survey(chat_id, message):
