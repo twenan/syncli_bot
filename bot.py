@@ -103,9 +103,10 @@ async def load_faq_from_yandex_disk():
                             sheet = workbook.active
                             for row in sheet.iter_rows(min_row=2, values_only=True):
                                 question, answer = row[0], row[1]
+                                logger.debug(f"Обрабатываем строку: {question} | {answer}")
                                 if question and answer:
                                     faq_dict[str(question).lower()] = str(answer)
-                            logger.debug(f"FAQ успешно загружен: {faq_dict}")
+                            logger.debug(f"FAQ загружен: {faq_dict}")
                             return faq_dict
                         else:
                             logger.error(f"Ошибка загрузки файла: {file_response.status}")
@@ -302,11 +303,11 @@ async def show_faq(message: types.Message):
         await message.answer("Список вопросов временно недоступен.")
         return
 
-    # Формируем сообщения
+    # Формируем сообщение
     base_text = "📌 Часто задаваемые вопросы:\n\n"
     messages = []
     current_message = base_text
-    max_length = 3900  # Уменьшаем лимит для безопасности
+    max_length = 3900  # Уменьшенный лимит
 
     for question in faq.keys():
         line = f"👉 {question.capitalize()}\n"
@@ -315,18 +316,23 @@ async def show_faq(message: types.Message):
             current_message = base_text
         current_message += line
     
-    # Добавляем финальное сообщение
     current_message += "\nНапишите ваш вопрос!"
     messages.append(current_message.strip())
 
-    # Отправляем все части
-    try:
-        for i, msg in enumerate(messages):
+    # Проверяем длину и отправляем
+    for i, msg in enumerate(messages):
+        logger.debug(f"Часть {i+1}/{len(messages)}, длина: {len(msg)}")
+        if len(msg) > 4096:
+            logger.error(f"Сообщение слишком длинное: {len(msg)} символов")
+            await message.answer("Ошибка: список вопросов слишком длинный.")
+            return
+        try:
             await message.answer(msg)
-            logger.debug(f"Отправлена часть {i+1}/{len(messages)}, длина: {len(msg)}")
-    except Exception as e:
-        logger.error(f"Ошибка отправки FAQ: {str(e)}")
-        await message.answer("Ошибка при отображении списка вопросов.")
+            logger.debug(f"Успешно отправлена часть {i+1}")
+        except Exception as e:
+            logger.error(f"Ошибка отправки: {str(e)}")
+            await message.answer("Ошибка при отображении вопросов.")
+            return
 
 # Функция завершения анкеты и отправки данных менеджеру
 async def finish_survey(chat_id, message):
