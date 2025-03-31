@@ -118,6 +118,7 @@ async def load_faq_from_yandex_disk():
         logger.error(f"Исключение при загрузке FAQ: {str(e)}")
         return {}
 
+
 # Функция обновления глобального словаря FAQ
 async def update_faq():
     """Обновляет глобальный словарь faq данными из Яндекс.Диска, добавляет заглушку при ошибке."""
