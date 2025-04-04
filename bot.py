@@ -294,46 +294,13 @@ async def handle_ready(message: types.Message):
 # Обработчик кнопки "Частые вопросы"
 @dp.message(lambda message: message.text == "Частые вопросы")
 async def show_faq(message: types.Message):
-    """Показывает список часто задаваемых вопросов из словаря faq, разбивая на части."""
+    """Запрашивает у пользователя вопрос для поиска в FAQ."""
     chat_id = message.chat.id
     if chat_id in user_answers:
         del user_answers[chat_id]
     
-    logger.debug(f"FAQ для отображения: {faq}")
-    if not faq:
-        await message.answer("Список вопросов временно недоступен.")
-        return
-
-    # Формируем сообщение
-    base_text = "📌 Часто задаваемые вопросы:\n\n"
-    messages = []
-    current_message = base_text
-    max_length = 3900  # Уменьшенный лимит
-
-    for question in faq.keys():
-        line = f"👉 {question.capitalize()}\n"
-        if len(current_message) + len(line) > max_length:
-            messages.append(current_message.strip())
-            current_message = base_text
-        current_message += line
-    
-    current_message += "\nНапишите ваш вопрос!"
-    messages.append(current_message.strip())
-
-    # Проверяем длину и отправляем
-    for i, msg in enumerate(messages):
-        logger.debug(f"Часть {i+1}/{len(messages)}, длина: {len(msg)}")
-        if len(msg) > 4096:
-            logger.error(f"Сообщение слишком длинное: {len(msg)} символов")
-            await message.answer("Ошибка: список вопросов слишком длинный.")
-            return
-        try:
-            await message.answer(msg)
-            logger.debug(f"Успешно отправлена часть {i+1}")
-        except Exception as e:
-            logger.error(f"Ошибка отправки: {str(e)}")
-            await message.answer("Ошибка при отображении вопросов.")
-            return
+    logger.debug(f"FAQ доступен: {faq}")
+    await message.answer("Пожалуйста, задайте ваш вопрос")
 
 # Функция завершения анкеты и отправки данных менеджеру
 async def finish_survey(chat_id, message):
@@ -378,42 +345,29 @@ async def finish_survey(chat_id, message):
 # Обработчик текстовых сообщений для анкеты и FAQ
 @dp.message(lambda message: message.text)
 async def collect_answers_or_faq(message: types.Message):
-    """Собирает ответы на анкету или отвечает на вопросы из FAQ с улучшенным поиском."""
+    """Обрабатывает ответы на анкету или ищет ответы в FAQ."""
     chat_id = message.chat.id
     text = message.text.lower()
 
-    # Обработка сообщений в группах (только FAQ)
-    if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
-        best_match = None
-        max_words_matched = 0
-        text_words = set(text.split())  # Разбиваем запрос на слова
-
-        for keyword, response in faq.items():
-            keyword_words = set(keyword.lower().split())
-            matched_words = len(text_words & keyword_words)  # Считаем совпадения слов
-            if matched_words > max_words_matched:
-                max_words_matched = matched_words
-                best_match = response
-        if best_match:
-            await message.reply(best_match)
-        return
-
-    # Обработка FAQ в личных чатах
+    # Обработка FAQ в личных чатах и группах
+    logger.debug(f"Поиск в FAQ для текста: {text}")
     best_match = None
     max_words_matched = 0
-    text_words = set(text.split())  # Разбиваем запрос на слова
+    text_words = set(text.split())
 
     for keyword, response in faq.items():
         keyword_words = set(keyword.lower().split())
-        matched_words = len(text_words & keyword_words)  # Считаем совпадения слов
+        matched_words = len(text_words & keyword_words)
         if matched_words > max_words_matched:
             max_words_matched = matched_words
             best_match = response
+            logger.debug(f"Найдено совпадение: {keyword} (совпадений: {matched_words})")
+
     if best_match:
         await message.answer(best_match)
         return
 
-    # Обработка анкеты
+    # Обработка анкеты (если пользователь в процессе)
     if chat_id in user_answers:
         if text == "назад" and user_answers[chat_id]["answers"]:
             user_answers[chat_id]["answers"].pop()
